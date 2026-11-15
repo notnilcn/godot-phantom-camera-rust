@@ -16,6 +16,7 @@ repository = "https://github.com/notnilcn/godot-phantom-camera-rust"
 
 [lib]
 name = "phantom_camera_rust"
+path = "rust/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
