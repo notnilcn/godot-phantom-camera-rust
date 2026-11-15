@@ -1,3 +1,0 @@
-# Leftover Cargo output from before the Rust crate moved into
-# addons/phantom_camera_rust (now a submodule with its own .gitignore).
-target/
