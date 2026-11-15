@@ -1,0 +1,5 @@
+# Built GDExtension libraries (tools/build.sh installs them here).
+bin/
+
+# Cargo build output.
+target/

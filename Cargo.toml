@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Rust GDExtension port of Phantom Camera 0.11.0.3 (MIT, Marcus Skov).
+# The upstream licence text ships in LICENSE-PhantomCamera-MIT; this port is
+# GPL-3.0-only (see LICENSE).
+
+[package]
+name = "phantom-camera-rust"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+rust-version = "1.97"
+publish = false
+description = "Rust GDExtension port of the Phantom Camera addon (v0.11.0.3) for Godot 4.7."
+repository = "https://github.com/notnilcn/godot-phantom-camera-rust"
+
+[lib]
+name = "phantom_camera_rust"
+path = "rust/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Pinned to the gdext version the port was validated against (Godot 4.7 API).
+godot = { version = "=0.5.5", features = ["api-4-7"] }
+
+[lints.rust]
+# A GDExtension entry point needs `unsafe impl ExtensionLibrary`; keep the
+# `unsafe` confined to that glue.
+unsafe_code = "allow"
+
+[lints.clippy]
+all = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+
+# Editor builds load the debug library; keep them fast and small while still
+# carrying line tables for debugging. Release builds are what an exported game
+# ships.
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
