@@ -88,7 +88,7 @@ fn real_of(value: f64) -> real {
 /// out of the resource during its tween setup; `Camera3DResource::read`-style
 /// indirection would only add noise (`PORT-PLAN.md` cross-module contract).
 #[derive(GodotClass)]
-#[class(base=Resource)]
+#[class(base=Resource, tool)]
 pub struct PhantomCameraTween {
     base: Base<Resource>,
 
