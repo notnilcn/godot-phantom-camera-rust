@@ -4,6 +4,13 @@
 # The upstream licence text ships in LICENSE-PhantomCamera-MIT; this port is
 # GPL-3.0-only (see LICENSE).
 
+# The addon is a repository of its own, vendored into the Godot project as a
+# submodule. Declaring the workspace root here keeps `cargo build` inside this
+# folder (tools/build.sh, and the client build scripts) independent of whichever
+# Cargo workspace happens to contain the checkout, and lets the profiles below
+# apply.
+[workspace]
+
 [package]
 name = "phantom-camera-rust"
 version = "0.1.0"
