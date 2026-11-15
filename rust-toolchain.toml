@@ -1,7 +1,0 @@
-# SPDX-License-Identifier: GPL-3.0-only
-#
-# Toolchain used to build and validate the port (see README "Verification").
-[toolchain]
-channel = "1.98.1"
-components = ["rustfmt", "clippy"]
-profile = "minimal"

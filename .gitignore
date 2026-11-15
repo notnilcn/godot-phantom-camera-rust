@@ -1,5 +1,3 @@
-# Built GDExtension libraries (tools/build.sh installs them here).
-addons/phantom_camera_rust/bin/
-
-# Cargo build output.
+# Leftover Cargo output from before the Rust crate moved into
+# addons/phantom_camera_rust (now a submodule with its own .gitignore).
 target/
