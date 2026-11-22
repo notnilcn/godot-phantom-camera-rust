@@ -2,32 +2,7 @@
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_2d.gd
 //
-//! `PhantomCamera2D` — the 2D camera rig node.
-//!
-//! Ported from `addons/phantom_camera/scripts/phantom_camera/phantom_camera_2d.gd`
-//! (v0.11.0.3, MIT, Marcus Skov), which is preserved as the read-only parity
-//! oracle. All `:NNN` anchors below are lines of that file.
-//!
-//! Algorithm anchors:
-//! - lifecycle `:706-748`, scheduling `:750-757`, `process_logic` `:760-789`
-//! - follow `:799-801`, `_set_follow_position` `:804-905`,
-//!   `_interpolate_position` `:1005-1041`, `_smooth_damp` `:1044-1065`
-//! - FRAMED incremental dead zone `:854-904`
-//! - lookahead `:914-1002`
-//! - limits `:1068-1072`, `update_limit_all_sides` `:1223-1287`
-//! - priority/tween-skip plumbing `:1302-1310`, `:1359-1363`
-//!
-//! Deliberately omitted (editor-only, never runs in a build):
-//! `_validate_property` inspector hiding `:589-703`, the `_draw` frame preview
-//! `:1075-1086`, `_draw_camera_2d_limit` `:1100-1102`, and the
-//! `Engine.is_editor_hint()` branch of `_limit_checker` `:792-796`.
-//!
-//! `show_viewfinder_in_play` is stored for ABI parity but inert: the viewfinder
-//! panel is out of scope for this port.
 
-// The if/if let nesting below deliberately mirrors the oracle's branch structure
-// so every block keeps a 1:1 line anchor to the GDScript; collapsing the branches
-// (clippy::collapsible_if) would destroy that correspondence.
 #![allow(clippy::collapsible_if)]
 use godot::builtin::{Array, NodePath, Rect2, Transform2D, Vector2, Vector2i, Vector4, Vector4i};
 use godot::classes::{CollisionShape2D, Engine, Node2D, Path2D, TileMapLayer};
@@ -40,18 +15,13 @@ use crate::abi::{
 use crate::manager::PhantomCameraManager;
 use crate::resources::{PhantomCameraNoise2D, PhantomCameraTween};
 
-/// Godot's `Side` enum, used by `set_limit`/`get_limit` and the manager's
-/// `limit_2d_changed` dispatch (`phantom_camera_2d.gd:1283-1286`).
 pub const SIDE_LEFT: i64 = 0;
 pub const SIDE_TOP: i64 = 1;
 pub const SIDE_RIGHT: i64 = 2;
 pub const SIDE_BOTTOM: i64 = 3;
 
-/// `draw_limits` is a `static var` in the oracle (`:549`): one flag shared by every
-/// instance. Mirrored as an atomic to keep the shared semantics without `unsafe`.
 static DRAW_LIMITS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Godot `clampf` — unlike `f64::clamp` this never panics when `min > max`.
 fn clampf(value: f64, min: f64, max: f64) -> f64 {
     if value < min {
         min
@@ -84,7 +54,6 @@ fn is_zero_approx(value: f64) -> bool {
     value.abs() < 0.00001
 }
 
-/// Godot `signf` — returns `0.0` for both zeros, unlike `f64::signum`.
 fn signf(value: f64) -> f64 {
     if value > 0.0 {
         1.0
@@ -95,7 +64,6 @@ fn signf(value: f64) -> f64 {
     }
 }
 
-/// `Vector2[i]` as the oracle writes it (gdext needs `Vector2Axis`, not an int).
 fn axis2(value: &Vector2, index: usize) -> real {
     if index == 0 { value.x } else { value.y }
 }
@@ -108,7 +76,6 @@ fn set_axis2(value: &mut Vector2, index: usize, component: real) {
     }
 }
 
-/// Godot `Math::roundi`.
 fn roundi(value: real) -> i32 {
     let value = f64_of(value);
     if value >= 0.0 {
@@ -123,16 +90,14 @@ fn roundi(value: real) -> i32 {
 pub struct PhantomCamera2D {
     base: Base<Node2D>,
 
-    // ----- exported surface (`#region Exported Properties`, `:103-510`) -----
-    /// `:110-121`.
     #[export]
     #[var(set = set_priority_override, get = get_priority_override)]
     pub priority_override: bool,
-    /// `:133-135` — plain `int`, `PROPERTY_HINT_NONE`.
+
     #[export]
     #[var(set = set_priority, get = get_priority)]
     pub priority: i64,
-    /// `:142-178` — `PROPERTY_HINT_ENUM`, hint string per the ABI dump.
+
     #[export]
     #[var(
         set = set_follow_mode,
@@ -141,38 +106,38 @@ pub struct PhantomCamera2D {
         hint_string = "None:0,Glued:1,Simple:2,Group:3,Path:4,Framed:5"
     )]
     pub follow_mode: i64,
-    /// `:183-185`.
+
     #[export]
     #[var(set = set_follow_target, get = get_follow_target)]
     pub follow_target: Option<Gd<Node2D>>,
-    /// `:188-190`.
+
     #[export]
     #[var(set = set_follow_targets, get = get_follow_targets)]
     pub follow_targets: Array<Gd<Node2D>>,
-    /// `:196-198`.
+
     #[export]
     #[var(set = set_follow_path, get = get_follow_path)]
     pub follow_path: Option<Gd<Path2D>>,
-    /// `:203-205` — `PROPERTY_HINT_LINK`.
+
     #[export]
     #[var(set = set_zoom, get = get_zoom, hint = LINK)]
     pub zoom: Vector2,
-    /// `:213-215`.
+
     #[export]
     #[var(set = set_snap_to_pixel, get = get_snap_to_pixel)]
     pub snap_to_pixel: bool,
-    /// `:223-228`.
+
     #[export]
     pub frame_preview: bool,
-    /// `:238-240` — the oracle defaults this to a fresh `PhantomCameraTween`.
+
     #[export]
     #[var(set = set_tween_resource, get = get_tween_resource)]
     pub tween_resource: Option<Gd<PhantomCameraTween>>,
-    /// `:248-250`.
+
     #[export]
     #[var(set = set_tween_on_load, get = get_tween_on_load)]
     pub tween_on_load: bool,
-    /// `:257` — `PROPERTY_HINT_ENUM`.
+
     #[export]
     #[var(
         set = set_inactive_update_mode,
@@ -181,23 +146,23 @@ pub struct PhantomCamera2D {
         hint_string = "Always:0,Never:1"
     )]
     pub inactive_update_mode: i64,
-    /// `:262-264`.
+
     #[export(flags_2d_render)]
     #[var(set = set_host_layers, get = get_host_layers)]
     pub host_layers: i64,
-    /// `:269-271`.
+
     #[export]
     #[var(set = set_follow_offset, get = get_follow_offset)]
     pub follow_offset: Vector2,
-    /// `:276-278`.
+
     #[export]
     #[var(set = set_follow_damping, get = get_follow_damping)]
     pub follow_damping: bool,
-    /// `:284-287` — `PROPERTY_HINT_LINK`.
+
     #[export]
     #[var(set = set_follow_damping_value, get = get_follow_damping_value, hint = LINK)]
     pub follow_damping_value: Vector2,
-    /// `:291-293` — `PROPERTY_HINT_ENUM`.
+
     #[export]
     #[var(
         set = set_lock_axis,
@@ -206,11 +171,11 @@ pub struct PhantomCamera2D {
         hint_string = "None:0,X:1,Y:2,Xy:3"
     )]
     pub follow_axis_lock: i64,
-    /// `:300-303`.
+
     #[export]
     #[var(set = set_rotate_with_target, get = get_rotate_with_target)]
     pub rotate_with_target: bool,
-    /// `:306-308` — `PROPERTY_HINT_RANGE`, radians-as-degrees.
+
     #[export]
     #[var(
         set = set_rotation_offset,
@@ -219,11 +184,11 @@ pub struct PhantomCamera2D {
         hint_string = "-360.0,360.0,0.001,radians_as_degrees"
     )]
     pub rotation_offset: f64,
-    /// `:311-313`.
+
     #[export]
     #[var(set = set_rotation_damping, get = get_rotation_damping)]
     pub rotation_damping: bool,
-    /// `:316-318` — `PROPERTY_HINT_RANGE`.
+
     #[export]
     #[var(
         set = set_rotation_damping_value,
@@ -232,11 +197,11 @@ pub struct PhantomCamera2D {
         hint_string = "0.0,1.0"
     )]
     pub rotation_damping_value: f64,
-    /// `:322-324`.
+
     #[export]
     #[var(set = set_lookahead, get = get_lookahead)]
     pub lookahead: bool,
-    /// `:331-333` — `PROPERTY_HINT_LINK` with a seconds suffix.
+
     #[export]
     #[var(
         set = set_lookahead_time,
@@ -245,7 +210,7 @@ pub struct PhantomCamera2D {
         hint_string = "suffix:s"
     )]
     pub lookahead_time: Vector2,
-    /// `:339-341` — `PROPERTY_HINT_RANGE`.
+
     #[export]
     #[var(
         set = set_lookahead_acceleration,
@@ -254,7 +219,7 @@ pub struct PhantomCamera2D {
         hint_string = "0.0,1.0,0.001,or_greater"
     )]
     pub lookahead_acceleration: f64,
-    /// `:347-349` — `PROPERTY_HINT_RANGE`.
+
     #[export]
     #[var(
         set = set_lookahead_deceleration,
@@ -263,11 +228,11 @@ pub struct PhantomCamera2D {
         hint_string = "0.0,1.0,0.001,or_greater"
     )]
     pub lookahead_deceleration: f64,
-    /// `:354-356`.
+
     #[export]
     #[var(set = set_lookahead_max, get = get_lookahead_max)]
     pub lookahead_max: bool,
-    /// `:360-362` — `PROPERTY_HINT_LINK` with a `px/s` suffix.
+
     #[export]
     #[var(
         set = set_lookahead_max_value,
@@ -276,23 +241,23 @@ pub struct PhantomCamera2D {
         hint_string = "suffix:px/s"
     )]
     pub lookahead_max_value: Vector2,
-    /// `:373-375`.
+
     #[export]
     #[var(set = set_auto_zoom, get = get_auto_zoom)]
     pub auto_zoom: bool,
-    /// `:380-382`.
+
     #[export]
     #[var(set = set_auto_zoom_min, get = get_auto_zoom_min)]
     pub auto_zoom_min: f64,
-    /// `:387-389`.
+
     #[export]
     #[var(set = set_auto_zoom_max, get = get_auto_zoom_max)]
     pub auto_zoom_max: f64,
-    /// `:396-398`.
+
     #[export]
     #[var(set = set_auto_zoom_margin, get = get_auto_zoom_margin)]
     pub auto_zoom_margin: Vector4,
-    /// `:407-412` — `PROPERTY_HINT_RANGE`.
+
     #[export]
     #[var(
         set = set_dead_zone_width,
@@ -301,7 +266,7 @@ pub struct PhantomCamera2D {
         hint_string = "0.0,1.0"
     )]
     pub dead_zone_width: f64,
-    /// `:419-424` — `PROPERTY_HINT_RANGE`.
+
     #[export]
     #[var(
         set = set_dead_zone_height,
@@ -310,31 +275,30 @@ pub struct PhantomCamera2D {
         hint_string = "0.0,1.0"
     )]
     pub dead_zone_height: f64,
-    /// `:429` — inert (viewfinder panel out of scope).
+
     #[export]
     pub show_viewfinder_in_play: bool,
-    /// `:435-441`.
+
     #[export]
     #[var(set = set_draw_limits, get = get_draw_limits)]
     pub draw_limits: bool,
-    /// `:445-447`.
+
     #[export]
     #[var(set = set_limit_left, get = get_limit_left)]
     pub limit_left: i64,
-    /// `:450-452`.
+
     #[export]
     #[var(set = set_limit_top, get = get_limit_top)]
     pub limit_top: i64,
-    /// `:455-457`.
+
     #[export]
     #[var(set = set_limit_right, get = get_limit_right)]
     pub limit_right: i64,
-    /// `:460-462`.
+
     #[export]
     #[var(set = set_limit_bottom, get = get_limit_bottom)]
     pub limit_bottom: i64,
-    /// `:475-477` — `PROPERTY_HINT_NODE_PATH_VALID_TYPES`, hint string
-    /// `TileMapLayer,CollisionShape2D`.
+
     #[export]
     #[var(
         set = set_limit_target,
@@ -343,24 +307,23 @@ pub struct PhantomCamera2D {
         hint_string = "TileMapLayer,CollisionShape2D"
     )]
     pub limit_target: NodePath,
-    /// `:482-484`.
+
     #[export]
     #[var(set = set_limit_margin, get = get_limit_margin)]
     pub limit_margin: Vector4i,
-    /// `:492-494`.
+
     #[export]
     #[var(set = set_noise, get = get_noise)]
     pub noise: Option<Gd<PhantomCameraNoise2D>>,
-    /// `:500-504`.
+
     #[export]
     #[var(set = set_preview_noise, get = get_preview_noise)]
     pub _preview_noise: bool,
-    /// `:508-510`.
+
     #[export(flags_2d_render)]
     #[var(set = set_noise_emitter_layer, get = get_noise_emitter_layer)]
     pub noise_emitter_layer: i64,
 
-    // ----- private state (`#region Private Variables`, `:512-569`) -----
     is_active_pcam: bool,
     should_follow: bool,
     follow_target_physics_based: bool,
@@ -369,7 +332,7 @@ pub struct PhantomCamera2D {
     rigid_body_2d: Option<Gd<godot::classes::RigidBody2D>>,
     has_multiple_follow_targets: bool,
     follow_targets_single_target_index: i64,
-    /// Rust mirror of the oracle's `_follow_targets` (`:526`).
+
     follow_targets_cache: Vec<Gd<Node2D>>,
     follow_velocity_ref: Vector2,
     rotation_velocity_ref: f64,
@@ -390,12 +353,11 @@ pub struct PhantomCamera2D {
     transform_output: Transform2D,
     transform_noise: Transform2D,
     has_noise_resource: bool,
-    /// Pending `noise_emitted` payload for the host (see `take_noise_output`).
+
     pending_noise: Option<Transform2D>,
-    /// `follow_axis_lock` assigned before the node was ready (`:1610-1628`).
+
     pending_axis_lock: Option<i64>,
 
-    // ----- public non-exported script variables (`:571-585`) -----
     tween_duration_fallback: f64,
     tween_transition_fallback: i64,
     tween_ease_fallback: i64,
@@ -404,9 +366,6 @@ pub struct PhantomCamera2D {
 
 #[godot_api]
 impl PhantomCamera2D {
-    // ------------------------------------------------------------------
-    // Signals (`#region Signals`, `:19-61`)
-    // ------------------------------------------------------------------
     #[signal]
     fn became_active();
     #[signal]
@@ -417,8 +376,7 @@ impl PhantomCamera2D {
     fn follow_target_changed();
     #[signal]
     fn dead_zone_changed();
-    /// 2D's `dead_zone_reached` carries the touched sides as `±1` components
-    /// (`:39`, emitted at `:899-900`).
+
     #[signal]
     fn dead_zone_reached(side: Vector2);
     #[signal]
@@ -434,18 +392,11 @@ impl PhantomCamera2D {
     #[signal]
     fn physics_target_changed();
 
-    /// ABI discriminator replacing the oracle's `get_class()` override
-    /// (`:1961-1966`); see `PORT-PLAN.md` §Cross-class contract.
     #[func]
     pub fn pcam_kind(&self) -> GString {
         GString::from(PcamKind::TwoD.as_str())
     }
 
-    // ------------------------------------------------------------------
-    // Typed seams used by PhantomCameraHost / PhantomCameraManager.
-    // ------------------------------------------------------------------
-
-    /// `pcam.host_layers & host_layers != 0` (`phantom_camera_host.gd:364-366`).
     pub fn is_in_host_layer(&self, host_layers: i64) -> bool {
         self.host_layers & host_layers != 0
     }
@@ -462,12 +413,10 @@ impl PhantomCamera2D {
         self.base().is_visible_in_tree()
     }
 
-    /// `set_is_active(self, value)` without the host type check (`:1424-1429`).
     pub fn host_set_active(&mut self, value: bool) {
         self.is_active_pcam = value;
     }
 
-    /// `set_tween_skip` without the host type check (`:1302-1310`).
     pub fn host_set_tween_skip(&mut self, value: bool) {
         self.tween_skip = value;
     }
@@ -496,16 +445,10 @@ impl PhantomCamera2D {
         self.signals().tween_interrupted().emit(pcam);
     }
 
-    /// Drains the last `noise_emitted` payload.
-    ///
-    /// The oracle connects `noise_emitted` to the host (`phantom_camera_host.gd:517-518`);
-    /// the port keeps cross-class traffic typed, so the host pulls instead. Same
-    /// observable result: the payload is latched until the host consumes it.
     pub fn take_noise_output(&mut self) -> Option<Transform2D> {
         self.pending_noise.take()
     }
 
-    /// Manager fan-out for `PhantomCameraNoiseEmitter2D` output (`:1161-1163`).
     pub fn pcam_noise_emitted(&mut self, emitter_noise_output: Transform2D, emitter_layer: i64) {
         if self.noise_emitter_layer & emitter_layer != 0 {
             self.signals().noise_emitted().emit(emitter_noise_output);
@@ -513,16 +456,11 @@ impl PhantomCamera2D {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Lifecycle
-    // ------------------------------------------------------------------
-
-    /// `:706-730`.
     fn enter_tree_impl(&mut self) {
         self.tween_skip = !self.tween_on_load;
         let this = self.base().clone().upcast::<Node>();
         PhantomCameraManager::notify_pcam_added(PcamKind::TwoD, &this);
-        // `:712` assigns through the property setter.
+
         self.set_priority_override(false);
 
         match self.follow_mode {
@@ -543,9 +481,6 @@ impl PhantomCamera2D {
             self.base_mut().connect("visibility_changed", &callable);
         }
 
-        // Single-target modes only reached `_check_physics_body` through the oracle's
-        // `set_follow_target` (`:1469-1489`), which the scene loader called before
-        // `_ready`. Resolve it here instead so the idle/physics split is correct.
         if matches!(self.follow_mode, 1 | 2 | 5) {
             if let Some(target) = self.follow_target_node() {
                 self.check_physics_body(&target);
@@ -555,23 +490,17 @@ impl PhantomCamera2D {
         self.update_limit_all_sides();
     }
 
-    /// `:733-738`.
     fn exit_tree_impl(&mut self) {
-        // parity: `:734-735` assigns `follow_targets = []` through
-        // `set_follow_targets`, which returns early unless the mode is GROUP — so
-        // the oracle line is a no-op. Kept as a no-op.
         let this = self.base().clone().upcast::<Node>();
         PhantomCameraManager::notify_pcam_removed(PcamKind::TwoD, &this);
     }
 
-    /// `:741-748`.
     fn ready_impl(&mut self) {
         self.transform_output = self.base().get_global_transform();
         if !Engine::singleton().is_editor_hint() {
             self._preview_noise = true;
         }
-        // Scene-assigned references resolve lazily (their oracle setters ran before
-        // `_ready`); re-apply the side effects that matter at runtime.
+
         self.sync_noise_resource();
         self.resolve_limit_target();
         if let Some(lock) = self.pending_axis_lock.take() {
@@ -580,7 +509,6 @@ impl PhantomCamera2D {
         self.transform_output = self.base().get_global_transform();
     }
 
-    /// `:750-752` — an ACTIVE pcam never self-ticks; the host pumps `process_logic`.
     fn process_impl(&mut self, delta: f64) {
         if self.follow_target_physics_based || self.is_active_pcam {
             return;
@@ -588,7 +516,6 @@ impl PhantomCamera2D {
         self.process_logic(delta);
     }
 
-    /// `:755-757`.
     fn physics_process_impl(&mut self, delta: f64) {
         if !self.follow_target_physics_based || self.is_active_pcam {
             return;
@@ -596,7 +523,6 @@ impl PhantomCamera2D {
         self.process_logic(delta);
     }
 
-    /// `:760-789`.
     #[func]
     pub fn process_logic(&mut self, delta: f64) {
         if self.is_active_pcam {
@@ -615,8 +541,6 @@ impl PhantomCamera2D {
                 }
             }
         }
-
-        // `_limit_checker()` (`:792-796`) is gated on `Engine.is_editor_hint()`: omitted.
 
         if self.should_follow {
             self.follow(delta);
@@ -637,19 +561,12 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:799-801`.
     fn follow(&mut self, delta: f64) {
         self.set_follow_position(delta);
         let target = self.follow_target_position;
         self.interpolate_position(target, delta);
     }
 
-    /// `:804-905`.
-    ///
-    /// parity: the FRAMED branch (`:854-904`) mutates the *persistent*
-    /// `_follow_target_position` incrementally (`-=` against the previous frame's
-    /// value) instead of recomputing it. That statefulness is what makes the dead
-    /// zone sticky, so it is reproduced verbatim.
     fn set_follow_position(&mut self, delta: f64) {
         let editor = Engine::singleton().is_editor_hint();
         match self.follow_mode {
@@ -690,7 +607,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:816-840`.
     fn set_follow_position_group(&mut self, delta: f64) {
         let editor = Engine::singleton().is_editor_hint();
         if self.has_multiple_follow_targets {
@@ -744,7 +660,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:854-904` — the incremental FRAMED dead zone.
     fn set_follow_position_framed(&mut self, delta: f64, editor: bool) {
         if editor || !self.is_active_pcam {
             self.follow_target_position = self.target_position_offset();
@@ -826,7 +741,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1005-1041`.
     fn interpolate_position(&mut self, mut target_position: Vector2, delta: f64) {
         let editor = Engine::singleton().is_editor_hint();
         let mut output_rotation = self.base().get_global_transform().rotation();
@@ -851,7 +765,6 @@ impl PhantomCamera2D {
             }
         }
 
-        // `:1022` — the raw target position is applied to the PCam itself.
         self.base_mut().set_global_position(target_position);
 
         if !editor && self.follow_damping {
@@ -876,7 +789,6 @@ impl PhantomCamera2D {
         self.transform_output = Transform2D::from_angle_origin(output_rotation, target_position);
     }
 
-    /// `:966-1002`.
     fn apply_lookahead(&mut self, target_position: Vector2, delta: f64) -> Vector2 {
         let mut velocity = self.get_follow_target_velocity(target_position, delta);
 
@@ -902,7 +814,7 @@ impl PhantomCamera2D {
         for i in 0..2 {
             let desired_axis = f64_of(axis2(&desired, i));
             let offset_axis = f64_of(axis2(&self.lookahead_offset, i));
-            // `:978` — accelerating toward `desired` vs decelerating away from it.
+
             let climbing = signf(desired_axis - offset_axis) == signf(desired_axis);
             let (smooth, smooth_time) = if climbing {
                 (self.has_lookahead_acceleration, self.lookahead_acceleration)
@@ -932,7 +844,6 @@ impl PhantomCamera2D {
         target_position + self.lookahead_offset
     }
 
-    /// `:924-963`.
     fn get_follow_target_velocity(&mut self, target_position: Vector2, delta: f64) -> Vector2 {
         match self.follow_target_physics_class {
             0 => {
@@ -989,14 +900,12 @@ impl PhantomCamera2D {
         velocity
     }
 
-    /// `:914-918`.
     fn reset_lookahead(&mut self) {
         self.lookahead_offset = Vector2::ZERO;
         self.lookahead_offset_velocity_ref = Vector2::ZERO;
         self.lookahead_has_prev_sample = false;
     }
 
-    /// `:1092-1093`.
     fn target_position_offset(&self) -> Vector2 {
         match self.follow_target_node() {
             Some(target) => target.get_global_position() + self.follow_offset,
@@ -1004,7 +913,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1068-1072`.
     fn set_limit_clamp_position(&self, mut value: Vector2) -> Vector2 {
         let frame = self.camera_frame_rect().size;
         value.x = clampf32(
@@ -1020,7 +928,6 @@ impl PhantomCamera2D {
         value
     }
 
-    /// `:1082-1086` — the `_draw` consumer of this rect is editor-only and omitted.
     fn camera_frame_rect(&self) -> Rect2 {
         let screen = PhantomCameraManager::screen_size();
         let zoom = self.get_zoom();
@@ -1039,7 +946,6 @@ impl PhantomCamera2D {
         Rect2::new(-size / 2.0, size)
     }
 
-    /// `:1105-1109`.
     fn check_limit_is_not_default(&mut self) {
         let default = Vector4i::new(
             LIMIT_LEFT_DEFAULT as i32,
@@ -1050,13 +956,11 @@ impl PhantomCamera2D {
         self.limit_inactive_pcam = self.limit_sides != default;
     }
 
-    /// `:1112-1114` — connected to `visibility_changed` in `_enter_tree`.
     fn check_visibility(&mut self) {
         let this = self.base().clone().upcast::<Node>();
         PhantomCameraManager::notify_visibility_changed(&this);
     }
 
-    /// `:1116-1121`.
     fn follow_target_tree_exiting_impl(&mut self, target: &Gd<Node>) {
         if let Some(current) = self.follow_target_node() {
             if current.instance_id() == target.instance_id() {
@@ -1067,7 +971,6 @@ impl PhantomCamera2D {
             .retain(|cached| cached.instance_id() != target.instance_id());
     }
 
-    /// `:1123-1133`.
     fn should_follow_checker(&mut self) {
         if self.follow_mode == 0 {
             self.should_follow = false;
@@ -1078,7 +981,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1135-1158`.
     fn follow_targets_size_check(&mut self) {
         let mut targets_size = 0i64;
         self.follow_target_physics_based = false;
@@ -1111,8 +1013,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1181-1206`. The project-setting "jitter tips" `printerr` is editor advice;
-    /// only the state transition is load bearing.
     fn check_physics_body(&mut self, target: &Gd<Node2D>) {
         self.character_body_2d = None;
         self.rigid_body_2d = None;
@@ -1133,7 +1033,6 @@ impl PhantomCamera2D {
         self.signals().physics_target_changed().emit();
     }
 
-    /// `:1209-1214`.
     fn is_parents_physics(&mut self, target: Option<&Gd<Node>>) {
         let mut current = match target {
             Some(node) => Some(node.clone()),
@@ -1157,8 +1056,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1610-1628` — the `await ready` becomes a deferred apply via
-    /// `pending_axis_lock`.
     fn apply_axis_lock(&mut self, value: i64) {
         let editor = Engine::singleton().is_editor_hint();
         if value != 0 && !editor {
@@ -1177,10 +1074,6 @@ impl PhantomCamera2D {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Reference resolution helpers (the oracle used typed setters)
-    // ------------------------------------------------------------------
-
     fn follow_target_node(&self) -> Option<Gd<Node2D>> {
         self.follow_target
             .clone()
@@ -1194,10 +1087,6 @@ impl PhantomCamera2D {
     }
 
     fn connect_tree_exiting(&mut self, target: &Gd<Node2D>) {
-        // parity: `phantom_camera_2d.gd:1147` / `:1484` — the oracle connects
-        // `tree_exiting.connect(_follow_target_tree_exiting.bind(target))`, so the
-        // handler takes the target as its single argument while the signal itself
-        // carries none.
         let node = target.clone().upcast::<Node>();
         let callable = self
             .base()
@@ -1219,16 +1108,12 @@ impl PhantomCamera2D {
         }
     }
 
-    /// Seam note: the noise resource API was not part of the frozen cross-module
-    /// seam, but `resources.rs` exposes `set_trauma(&mut self, f64)`
-    /// (`phantom_camera_noise_2d.gd:112-114`), so it is called typed.
     fn set_noise_trauma(&mut self) {
         if let Some(mut noise) = self.noise.clone() {
             noise.bind_mut().set_trauma(1.0);
         }
     }
 
-    /// `phantom_camera_noise_2d.gd:119-131`.
     fn noise_transform(&mut self, delta: f64) -> Transform2D {
         match self.noise.clone() {
             Some(mut noise) => noise.bind_mut().get_noise_transform(delta),
@@ -1236,7 +1121,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1850-1890` — `limit_target` resolution (`_limit_node`).
     fn resolve_limit_target(&mut self) {
         let path = self.limit_target.clone();
         if path.is_empty() {
@@ -1280,16 +1164,11 @@ impl PhantomCamera2D {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Public API (`#region Public Functions`, `:1219-1343`)
-    // ------------------------------------------------------------------
-
-    /// `:1223-1287`.
     #[func]
     pub fn update_limit_all_sides(&mut self) {
         match self.compute_limit_sides() {
             Some(sides) => self.limit_sides = sides,
-            // `:1234` / `:1256` — the oracle bails out before touching `_limit_sides`.
+
             None => return,
         }
 
@@ -1304,7 +1183,6 @@ impl PhantomCamera2D {
         PhantomCameraManager::notify_draw_limit_2d(self.get_draw_limits());
     }
 
-    /// The rect -> sides step of `:1223-1287`.
     fn compute_limit_sides(&self) -> Option<Vector4i> {
         let Some(node) = self.limit_node.clone() else {
             return Some(Vector4i::new(
@@ -1316,7 +1194,6 @@ impl PhantomCamera2D {
         };
 
         let rect = if let Ok(tile_map) = node.clone().try_cast::<TileMapLayer>() {
-            // parity: `:1234` bails when the TileMapLayer has no TileSet.
             let tile_set = tile_map.get_tile_set()?;
             let used = tile_map.get_used_rect();
             let tile_size = tile_set.get_tile_size();
@@ -1335,7 +1212,6 @@ impl PhantomCamera2D {
                 tile_map_size - margin_min - margin_max,
             )
         } else if let Ok(collision) = node.clone().try_cast::<CollisionShape2D>() {
-            // parity: `:1256` bails when the CollisionShape2D has no Shape2D.
             let shape = collision.get_shape()?;
             let shape_rect = shape.get_rect();
             let shape_position = collision.get_global_position() + shape_rect.position;
@@ -1358,7 +1234,6 @@ impl PhantomCamera2D {
         ))
     }
 
-    /// `:1290-1296`.
     #[func]
     pub fn reset_limit(&mut self) {
         PhantomCameraManager::notify_limit_2d_changed(SIDE_LEFT, LIMIT_LEFT_DEFAULT);
@@ -1369,7 +1244,6 @@ impl PhantomCamera2D {
         PhantomCameraManager::notify_draw_limit_2d(draw);
     }
 
-    /// `:1302-1306`.
     #[func]
     pub fn set_tween_skip(&mut self, caller: Gd<Node>, value: bool) {
         if caller.try_cast::<crate::host::PhantomCameraHost>().is_ok() {
@@ -1379,32 +1253,27 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1308-1309`.
     #[func]
     pub fn get_tween_skip(&self) -> bool {
         self.tween_skip
     }
 
-    /// `:1312-1313`.
     #[func]
     pub fn get_transform_output(&self) -> Transform2D {
         self.transform_output
     }
 
-    /// `:1317-1318`.
     #[func]
     pub fn get_noise_transform(&self) -> Transform2D {
         self.transform_noise
     }
 
-    /// `:1323-1324`.
     #[func]
     pub fn emit_noise(&mut self, value: Transform2D) {
         self.signals().noise_emitted().emit(value);
         self.pending_noise = Some(value);
     }
 
-    /// `:1329-1334`.
     #[func]
     pub fn teleport_position(&mut self) {
         self.follow_velocity_ref = Vector2::ZERO;
@@ -1415,30 +1284,22 @@ impl PhantomCamera2D {
         PhantomCameraManager::notify_teleport(&this);
     }
 
-    /// `:1340-1341`.
     #[func]
     pub fn is_following(&self) -> bool {
         self.should_follow
     }
 
-    // ------------------------------------------------------------------
-    // Setters & getters (`#region Setter & Getter Functions`, `:1346-1968`)
-    // ------------------------------------------------------------------
-
-    /// `:1349-1352`.
     #[func]
     pub fn set_zoom(&mut self, value: Vector2) {
         self.zoom = value;
         self.base_mut().queue_redraw();
     }
 
-    /// `:1354-1355`.
     #[func]
     pub fn get_zoom(&self) -> Vector2 {
         self.zoom
     }
 
-    /// `:1359-1363`.
     #[func]
     pub fn set_priority(&mut self, value: i64) {
         self.priority = value.max(0);
@@ -1449,13 +1310,11 @@ impl PhantomCamera2D {
         PhantomCameraManager::notify_priority_changed(&this);
     }
 
-    /// `:1366-1367`.
     #[func]
     pub fn get_priority(&self) -> i64 {
         self.priority
     }
 
-    /// `:110-121`.
     #[func]
     pub fn set_priority_override(&mut self, value: bool) {
         self.priority_override = value;
@@ -1465,25 +1324,21 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:120-121`.
     #[func]
     pub fn get_priority_override(&self) -> bool {
         self.priority_override
     }
 
-    /// `:1371-1372`.
     #[func]
     pub fn set_tween_resource(&mut self, value: Option<Gd<PhantomCameraTween>>) {
         self.tween_resource = value;
     }
 
-    /// `:1376-1377`.
     #[func]
     pub fn get_tween_resource(&self) -> Option<Gd<PhantomCameraTween>> {
         self.tween_resource.clone()
     }
 
-    /// `:1382-1384`.
     #[func]
     pub fn set_tween_duration(&mut self, value: f64) {
         match self.tween_resource.clone() {
@@ -1495,12 +1350,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1388-1392`.
-    ///
-    /// The oracle always has a `PhantomCameraTween` (auto-created in the export
-    /// initializer), so a fresh PCam reports 1.0 / linear / ease-in-out. With no
-    /// resource assigned the port falls back to the same ABI defaults instead of the
-    /// oracle's null-path `0.0`.
     #[func]
     pub fn get_tween_duration(&self) -> f64 {
         match &self.tween_resource {
@@ -1515,7 +1364,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1397-1398`.
     #[func]
     pub fn set_tween_transition(&mut self, value: i64) {
         match self.tween_resource.clone() {
@@ -1527,7 +1375,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1402-1406`.
     #[func]
     pub fn get_tween_transition(&self) -> i64 {
         match &self.tween_resource {
@@ -1536,7 +1383,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1410-1411`.
     #[func]
     pub fn set_tween_ease(&mut self, value: i64) {
         match self.tween_resource.clone() {
@@ -1548,7 +1394,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1414-1418`.
     #[func]
     pub fn get_tween_ease(&self) -> i64 {
         match &self.tween_resource {
@@ -1557,7 +1402,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1424-1429`.
     #[func]
     pub fn set_is_active(&mut self, node: Gd<Node>, value: bool) {
         if node.try_cast::<crate::host::PhantomCameraHost>().is_ok() {
@@ -1568,25 +1412,21 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1434-1435`.
     #[func]
     pub fn is_active(&self) -> bool {
         self.is_active_pcam
     }
 
-    /// `:1439-1440`.
     #[func]
     pub fn set_tween_on_load(&mut self, value: bool) {
         self.tween_on_load = value;
     }
 
-    /// `:1443-1444`.
     #[func]
     pub fn get_tween_on_load(&self) -> bool {
         self.tween_on_load
     }
 
-    /// `:1447-1450`.
     #[func]
     pub fn set_host_layers(&mut self, value: i64) {
         self.host_layers = value;
@@ -1594,25 +1434,21 @@ impl PhantomCamera2D {
         PhantomCameraManager::notify_host_layer_changed(&this);
     }
 
-    /// `:1453-1454`.
     #[func]
     pub fn set_host_layers_value(&mut self, layer: i64, value: bool) {
         self.host_layers = set_layer(self.host_layers, layer, value);
     }
 
-    /// `:1457-1458`.
     #[func]
     pub fn get_host_layers(&self) -> i64 {
         self.host_layers
     }
 
-    /// `:1464-1465`.
     #[func]
     pub fn get_follow_mode(&self) -> i64 {
         self.follow_mode
     }
 
-    /// `:142-178`.
     #[func]
     pub fn set_follow_mode(&mut self, value: i64) {
         self.follow_mode = value;
@@ -1620,7 +1456,7 @@ impl PhantomCamera2D {
 
         if value == 0 {
             self.should_follow = false;
-            // `:149` `top_level = false` (CanvasItem property).
+
             self.base_mut().set("top_level", &false.to_variant());
             self.is_parents_physics(None);
             return;
@@ -1639,20 +1475,15 @@ impl PhantomCamera2D {
         }
 
         if value == 5 {
-            // parity: `:165-171` only connects `dead_zone_changed` when
-            // `_follow_framed_initial_set` is set, and nothing ever sets it true —
-            // `_on_dead_zone_changed` is unreachable dead code in the oracle too.
             if self.follow_framed_initial_set && self.follow_target_node().is_some() {
                 self.follow_framed_initial_set = false;
             }
         }
 
-        // `:173` `top_level = true`.
         self.base_mut().set("top_level", &true.to_variant());
         self.reset_lookahead();
     }
 
-    /// `:1469-1489`.
     #[func]
     pub fn set_follow_target(&mut self, value: Option<Gd<Node2D>>) {
         if self.follow_mode == 0 || self.follow_mode == 3 {
@@ -1682,7 +1513,6 @@ impl PhantomCamera2D {
         self.signals().follow_target_changed().emit();
     }
 
-    /// `:1492-1500`.
     #[func]
     pub fn erase_follow_target(&mut self) {
         if self.follow_target_node().is_none() {
@@ -1697,13 +1527,11 @@ impl PhantomCamera2D {
         self.signals().follow_target_changed().emit();
     }
 
-    /// `:1503-1504`.
     #[func]
     pub fn get_follow_target(&self) -> Option<Gd<Node2D>> {
         self.follow_target_node()
     }
 
-    /// `:1508-1513`.
     #[func]
     pub fn set_follow_path(&mut self, value: Option<Gd<Path2D>>) {
         self.follow_path = value.filter(|path| path.is_instance_valid());
@@ -1714,19 +1542,16 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1516-1517`.
     #[func]
     pub fn erase_follow_path(&mut self) {
         self.follow_path = None;
     }
 
-    /// `:1520-1521`.
     #[func]
     pub fn get_follow_path(&self) -> Option<Gd<Path2D>> {
         self.valid_follow_path()
     }
 
-    /// `:1525-1530`.
     #[func]
     pub fn set_follow_targets(&mut self, value: Array<Gd<Node2D>>) {
         if self.follow_mode != 3 {
@@ -1737,7 +1562,6 @@ impl PhantomCamera2D {
         self.reset_lookahead();
     }
 
-    /// `:1533-1542`.
     #[func]
     pub fn append_follow_targets(&mut self, value: Gd<Node2D>) {
         if !value.is_instance_valid() {
@@ -1752,7 +1576,6 @@ impl PhantomCamera2D {
         self.follow_targets_size_check();
     }
 
-    /// `:1545-1552`.
     #[func]
     pub fn append_follow_targets_array(&mut self, value: Array<Gd<Node2D>>) {
         for target in value.iter_shared() {
@@ -1768,7 +1591,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1555-1557`.
     #[func]
     pub fn erase_follow_targets(&mut self, value: Gd<Node2D>) {
         let mut index = None;
@@ -1784,7 +1606,6 @@ impl PhantomCamera2D {
         self.follow_targets_size_check();
     }
 
-    /// `:1560-1561`.
     #[func]
     pub fn get_follow_targets(&self) -> Array<Gd<Node2D>> {
         self.follow_targets.clone()
@@ -1796,11 +1617,6 @@ impl PhantomCamera2D {
             .any(|target| target.instance_id() == value.instance_id())
     }
 
-    /// `:1565-1579`.
-    ///
-    /// parity: the oracle's `match value:` compares the *offset `Vector2`* against
-    /// the `FollowLockAxis` enum, so no arm can ever match and
-    /// `_follow_axis_lock_value` is never updated here. Kept dead.
     #[func]
     pub fn set_follow_offset(&mut self, value: Vector2) {
         let temp_offset = self.follow_offset;
@@ -1810,37 +1626,31 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1583-1584`.
     #[func]
     pub fn get_follow_offset(&self) -> Vector2 {
         self.follow_offset
     }
 
-    /// `:1588-1590`.
     #[func]
     pub fn set_follow_damping(&mut self, value: bool) {
         self.follow_damping = value;
     }
 
-    /// `:1593-1594`.
     #[func]
     pub fn get_follow_damping(&self) -> bool {
         self.follow_damping
     }
 
-    /// `:1598-1602`.
     #[func]
     pub fn set_follow_damping_value(&mut self, value: Vector2) {
         self.follow_damping_value = Vector2::new(value.x.max(0.0), value.y.max(0.0));
     }
 
-    /// `:1605-1606`.
     #[func]
     pub fn get_follow_damping_value(&self) -> Vector2 {
         self.follow_damping_value
     }
 
-    /// `:1610-1628` (`await ready` becomes [`Self::pending_axis_lock`]).
     #[func]
     pub fn set_lock_axis(&mut self, value: i64) {
         self.follow_axis_lock = value;
@@ -1855,196 +1665,164 @@ impl PhantomCamera2D {
         self.apply_axis_lock(value);
     }
 
-    /// `:1631-1632`.
     #[func]
     pub fn get_lock_axis(&self) -> i64 {
         self.follow_axis_lock
     }
 
-    /// `:1636-1638`.
     #[func]
     pub fn set_rotate_with_target(&mut self, value: bool) {
         self.rotate_with_target = value;
     }
 
-    /// `:1641-1642`.
     #[func]
     pub fn get_rotate_with_target(&self) -> bool {
         self.rotate_with_target
     }
 
-    /// `:1646-1647`.
     #[func]
     pub fn set_rotation_offset(&mut self, value: f64) {
         self.rotation_offset = value;
     }
 
-    /// `:1650-1651`.
     #[func]
     pub fn get_rotation_offset(&self) -> f64 {
         self.rotation_offset
     }
 
-    /// `:1655-1657`.
     #[func]
     pub fn set_rotation_damping(&mut self, value: bool) {
         self.rotation_damping = value;
     }
 
-    /// `:1660-1661`.
     #[func]
     pub fn get_rotation_damping(&self) -> bool {
         self.rotation_damping
     }
 
-    /// `:1665-1666`.
     #[func]
     pub fn set_rotation_damping_value(&mut self, value: f64) {
         self.rotation_damping_value = value;
     }
 
-    /// `:1669-1670`.
     #[func]
     pub fn get_rotation_damping_value(&self) -> f64 {
         self.rotation_damping_value
     }
 
-    /// `:1674-1675`.
     #[func]
     pub fn set_snap_to_pixel(&mut self, value: bool) {
         self.snap_to_pixel = value;
     }
 
-    /// `:1678-1679`.
     #[func]
     pub fn get_snap_to_pixel(&self) -> bool {
         self.snap_to_pixel
     }
 
-    /// `:1683-1685`.
     #[func]
     pub fn set_auto_zoom(&mut self, value: bool) {
         self.auto_zoom = value;
     }
 
-    /// `:1688-1689`.
     #[func]
     pub fn get_auto_zoom(&self) -> bool {
         self.auto_zoom
     }
 
-    /// `:1693-1694`.
     #[func]
     pub fn set_auto_zoom_min(&mut self, value: f64) {
         self.auto_zoom_min = value;
     }
 
-    /// `:1697-1698`.
     #[func]
     pub fn get_auto_zoom_min(&self) -> f64 {
         self.auto_zoom_min
     }
 
-    /// `:1702-1703`.
     #[func]
     pub fn set_auto_zoom_max(&mut self, value: f64) {
         self.auto_zoom_max = value;
     }
 
-    /// `:1706-1707`.
     #[func]
     pub fn get_auto_zoom_max(&self) -> f64 {
         self.auto_zoom_max
     }
 
-    /// `:1711-1712`.
     #[func]
     pub fn set_auto_zoom_margin(&mut self, value: Vector4) {
         self.auto_zoom_margin = value;
     }
 
-    /// `:1715-1716`.
     #[func]
     pub fn get_auto_zoom_margin(&self) -> Vector4 {
         self.auto_zoom_margin
     }
 
-    /// `:1719-1722`.
     #[func]
     pub fn set_lookahead(&mut self, value: bool) {
         self.lookahead = value;
         self.reset_lookahead();
     }
 
-    /// `:1724-1725`.
     #[func]
     pub fn get_lookahead(&self) -> bool {
         self.lookahead
     }
 
-    /// `:1728-1732`.
     #[func]
     pub fn set_lookahead_time(&mut self, value: Vector2) {
         self.lookahead_time = Vector2::new(value.x.max(0.0), value.y.max(0.0));
     }
 
-    /// `:1734-1735`.
     #[func]
     pub fn get_lookahead_time(&self) -> Vector2 {
         self.lookahead_time
     }
 
-    /// `:1738-1740`.
     #[func]
     pub fn set_lookahead_max(&mut self, value: bool) {
         self.lookahead_max = value;
     }
 
-    /// `:1742-1743`.
     #[func]
     pub fn get_lookahead_max(&self) -> bool {
         self.lookahead_max
     }
 
-    /// `:1746-1750`.
     #[func]
     pub fn set_lookahead_max_value(&mut self, value: Vector2) {
         self.lookahead_max_value = Vector2::new(value.x.max(0.0), value.y.max(0.0));
     }
 
-    /// `:1752-1753`.
     #[func]
     pub fn get_lookahead_max_value(&self) -> Vector2 {
         self.lookahead_max_value
     }
 
-    /// `:1756-1761`.
     #[func]
     pub fn set_lookahead_acceleration(&mut self, value: f64) {
         self.lookahead_acceleration = value.max(0.0);
         self.has_lookahead_acceleration = !is_zero_approx(self.lookahead_acceleration);
     }
 
-    /// `:1763-1764`.
     #[func]
     pub fn get_lookahead_acceleration(&self) -> f64 {
         self.lookahead_acceleration
     }
 
-    /// `:1767-1772`.
     #[func]
     pub fn set_lookahead_deceleration(&mut self, value: f64) {
         self.lookahead_deceleration = value.max(0.0);
         self.has_lookahead_deceleration = !is_zero_approx(self.lookahead_deceleration);
     }
 
-    /// `:1774-1775`.
     #[func]
     pub fn get_lookahead_deceleration(&self) -> f64 {
         self.lookahead_deceleration
     }
 
-    /// `:1780-1786`.
     #[func]
     pub fn set_limit(&mut self, side: i64, value: i64) {
         match side {
@@ -2056,7 +1834,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1789-1797`.
     #[func]
     pub fn get_limit(&self, side: i64) -> i64 {
         match side {
@@ -2071,7 +1848,6 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:1801-1804`.
     #[func]
     pub fn set_limit_left(&mut self, value: i64) {
         self.limit_target_exist_error();
@@ -2079,13 +1855,11 @@ impl PhantomCamera2D {
         self.update_limit_all_sides();
     }
 
-    /// `:1807-1808`.
     #[func]
     pub fn get_limit_left(&self) -> i64 {
         self.limit_left
     }
 
-    /// `:1812-1815`.
     #[func]
     pub fn set_limit_top(&mut self, value: i64) {
         self.limit_target_exist_error();
@@ -2093,13 +1867,11 @@ impl PhantomCamera2D {
         self.update_limit_all_sides();
     }
 
-    /// `:1818-1819`.
     #[func]
     pub fn get_limit_top(&self) -> i64 {
         self.limit_top
     }
 
-    /// `:1823-1826`.
     #[func]
     pub fn set_limit_right(&mut self, value: i64) {
         self.limit_target_exist_error();
@@ -2107,13 +1879,11 @@ impl PhantomCamera2D {
         self.update_limit_all_sides();
     }
 
-    /// `:1829-1830`.
     #[func]
     pub fn get_limit_right(&self) -> i64 {
         self.limit_right
     }
 
-    /// `:1834-1837`.
     #[func]
     pub fn set_limit_bottom(&mut self, value: i64) {
         self.limit_target_exist_error();
@@ -2121,13 +1891,11 @@ impl PhantomCamera2D {
         self.update_limit_all_sides();
     }
 
-    /// `:1840-1841`.
     #[func]
     pub fn get_limit_bottom(&self) -> i64 {
         self.limit_bottom
     }
 
-    /// `:1850-1890` (`await ready` replaced by lazy resolution in `_ready`).
     #[func]
     pub fn set_limit_target(&mut self, value: NodePath) {
         self.limit_target = value;
@@ -2138,109 +1906,90 @@ impl PhantomCamera2D {
         self.update_limit_all_sides();
     }
 
-    /// `:1893-1897`.
     #[func]
     pub fn get_limit_target(&self) -> NodePath {
         self.limit_target.clone()
     }
 
-    /// `:1901-1903`.
     #[func]
     pub fn set_limit_margin(&mut self, value: Vector4i) {
         self.limit_margin = value;
         self.update_limit_all_sides();
     }
 
-    /// `:1905-1906`.
     #[func]
     pub fn get_limit_margin(&self) -> Vector4i {
         self.limit_margin
     }
 
-    /// `:1918-1925`.
     #[func]
     pub fn set_noise(&mut self, value: Option<Gd<PhantomCameraNoise2D>>) {
         self.noise = value;
         self.sync_noise_resource();
     }
 
-    /// `:1928-1929`.
     #[func]
     pub fn get_noise(&self) -> Option<Gd<PhantomCameraNoise2D>> {
         self.noise.clone()
     }
 
-    /// `:1931-1932`.
     #[func]
     pub fn has_noise_resource(&self) -> bool {
         self.has_noise_resource
     }
 
-    /// `:1936-1937`.
     #[func]
     pub fn set_noise_emitter_layer(&mut self, value: i64) {
         self.noise_emitter_layer = value;
     }
 
-    /// `:1940-1941`.
     #[func]
     pub fn set_noise_emitter_layer_value(&mut self, layer: i64, enabled: bool) {
         self.noise_emitter_layer = set_layer(self.noise_emitter_layer, layer, enabled);
     }
 
-    /// `:1944-1945`.
     #[func]
     pub fn get_noise_emitter_layer(&self) -> i64 {
         self.noise_emitter_layer
     }
 
-    /// `:1949-1950`.
     #[func]
     pub fn set_inactive_update_mode(&mut self, value: i64) {
         self.inactive_update_mode = value;
     }
 
-    /// `:1953-1954`.
     #[func]
     pub fn get_inactive_update_mode(&self) -> i64 {
         self.inactive_update_mode
     }
 
-    /// `:1957-1958`.
     #[func]
     pub fn get_follow_target_physics_based(&self) -> bool {
         self.follow_target_physics_based
     }
 
-    // ----- `#[var]` accessors for the remaining script-style exports -----
-
-    /// `:407-412`.
     #[func]
     pub fn set_dead_zone_width(&mut self, value: f64) {
         self.dead_zone_width = value;
         self.signals().dead_zone_changed().emit();
     }
 
-    /// `:411-412`.
     #[func]
     pub fn get_dead_zone_width(&self) -> f64 {
         self.dead_zone_width
     }
 
-    /// `:419-424`.
     #[func]
     pub fn set_dead_zone_height(&mut self, value: f64) {
         self.dead_zone_height = value;
         self.signals().dead_zone_changed().emit();
     }
 
-    /// `:423-424`.
     #[func]
     pub fn get_dead_zone_height(&self) -> f64 {
         self.dead_zone_height
     }
 
-    /// `:435-441`.
     #[func]
     pub fn set_draw_limits(&mut self, value: bool) {
         DRAW_LIMITS.store(value, std::sync::atomic::Ordering::Relaxed);
@@ -2249,13 +1998,11 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:440-441`.
     #[func]
     pub fn get_draw_limits(&self) -> bool {
         DRAW_LIMITS.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// `:500-504`.
     #[func]
     pub fn set_preview_noise(&mut self, value: bool) {
         self._preview_noise = value;
@@ -2264,32 +2011,21 @@ impl PhantomCamera2D {
         }
     }
 
-    /// `:503-504`.
     #[func]
     pub fn get_preview_noise(&self) -> bool {
         self._preview_noise
     }
 
-    // ----- handlers reachable from `Base::callable` -----
-    //
-    // The oracle connected engine signals to private methods (`_check_visibility`,
-    // `_follow_target_tree_exiting`, `_on_tile_map_changed`). gdext needs a
-    // registered method to build the `Callable`, so those handlers exist as
-    // `pcam_*` `#[func]`s; see the port report for this ABI addition.
-
-    /// `:1112-1114`.
     #[func]
     pub fn pcam_check_visibility(&mut self) {
         self.check_visibility();
     }
 
-    /// `:1116-1121`.
     #[func]
     pub fn pcam_follow_target_tree_exiting(&mut self, target: Gd<Node>) {
         self.follow_target_tree_exiting_impl(&target);
     }
 
-    /// `:1088-1089`.
     #[func]
     pub fn pcam_tile_map_changed(&mut self) {
         self.update_limit_all_sides();
@@ -2366,10 +2102,7 @@ impl INode2D for PhantomCamera2D {
             lookahead_has_prev_sample: false,
             follow_axis_is_locked: false,
             follow_axis_lock_value: Vector2::ZERO,
-            // parity: `:551` initializes `_limit_sides` from `_limit_sides_default`,
-            // which is declared *after* it (`:552`), so a fresh instance really holds
-            // `(0, 0, 0, 0)` until `_enter_tree` -> `update_limit_all_sides`. The ABI
-            // dump confirms the default is all-zero.
+
             limit_sides: Vector4i::new(0, 0, 0, 0),
             limit_node: None,
             limit_inactive_pcam: false,

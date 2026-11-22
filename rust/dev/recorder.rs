@@ -1,80 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 //
-//! `PcamRecorder` — a parity-harness observer.
-//!
-//! No oracle counterpart: the upstream addon has no recording node, so this file
-//! ports nothing. It is the *measurement* half of the parity harness, deliberately
-//! kept out of `pcam2d`/`pcam3d`/`host` so it can observe **either** backend —
-//! the GDScript oracle installed by that harness or the Rust
-//! classes in this crate. Every Phantom Camera access is therefore duck-typed
-//! through `Object::try_call()`; this module must never import `crate::pcam2d`,
-//! `crate::pcam3d` or `crate::host` (they are written by other owners), and it
-//! must work when those classes are not registered at all.
-//!
-//! Oracle anchors for the state sampled here (the frame pipeline whose observable
-//! behaviour is the thing being compared):
-//! - `scripts/phantom_camera_host/phantom_camera_host.gd:850-903` —
-//!   `_process` / `_tween_follow_checker`: `process_logic(delta)`,
-//!   `get_transform_output()`, the follow/tween writes into the real camera and
-//!   the 2D noise offset. The camera transform recorded on frame *f* is the result
-//!   of that frame's host pump (the host sits before the recorder in tree order).
-//! - `scripts/phantom_camera_host/phantom_camera_host.gd:970-1218` —
-//!   `_pcam_tween`: the `tween_started` / `is_tweening` / `tween_completed` emit
-//!   order captured by the signal stream.
-//! - `scripts/phantom_camera/phantom_camera_2d.gd:1312-1318,1366,1434,1931` —
-//!   `get_transform_output()`, `get_noise_transform()`, `get_priority()`,
-//!   `is_active()`, `has_noise_resource()`: the pcam fields the recorder samples.
-//!
-//! # Why `try_call` and not `get_class()`
-//!
-//! The oracle's `phantom_camera_2d.gd:1961` overrides `get_class()` so the
-//! GDScript node reports `"PhantomCamera2D"`. A *ptrcall* (`Gd::get_class()`)
-//! bypasses GDScript's method lookup and would answer `"Node2D"`; only a varcall
-//! (`try_call("get_class")`) honours the script override. The recorder uses the
-//! varcall everywhere so both backends answer identically — that is what makes
-//! `require_class` a real proof of *which* implementation ran.
-//!
-//! # Output schema (`pcam-record/v1`, one JSON object per line)
-//!
-//! Line 1 is the header:
-//!
-//! ```json
-//! {"kind":"header","schema":"pcam-record/v1","observer":"rust",
-//!  "godot":"4.7.2.stable.official.ed1daf0b","godot_hex":262918,"max_fps":60,
-//!  "dims":2,"camera_class":"Camera2D","camera_node":"/root/Harness/Demo/Camera2D",
-//!  "host_class":"PhantomCameraHost","host_node":"/root/Harness/Demo/Camera2D/Host",
-//!  "pcam_class":"PhantomCamera2D","pcam_node":"/root/Harness/Demo/Camera2D/Player",
-//!  "require_class":"PhantomCamera2D","frames":240,
-//!  "out":"C:/.../pcam/2d_example_scene.jsonl"}
-//! ```
-//!
-//! Every following line is one frame, with a fixed key order and fixed
-//! 9-decimal precision (so two runs diff byte-for-byte, not just numerically):
-//!
-//! ```json
-//! {"f":0,"d":0.016666667,"pos":[x,y],"rot":[r],"scale_zoom":[zx,zy],
-//!  "pcam":{"active":true,"priority":10,"transform":[6 floats],
-//!          "noise":[6 floats],"has_noise":false},
-//!  "signals":["became_active@3"]}
-//! ```
-//!
-//! Per dimension, to keep the static type of each array fixed:
-//!
-//! | field | 2D | 3D |
-//! |---|---|---|
-//! | `pos` | `[x, y]` camera global transform origin | `[x, y, z]` |
-//! | `rot` | `[radians]` (x-axis angle of the global transform) | `[qx, qy, qz, qw]` |
-//! | `scale_zoom` | `[zoom.x, zoom.y]` | `[fov, size, near, far, h_offset, v_offset]` |
-//! | `pcam.transform` | `Transform2D` → 6 floats | `Transform3D` → 12 floats |
-//! | `pcam.noise` | `get_noise_transform()` → 6 floats | 12 floats, `null` when absent |
-//!
-//! `signals` are `name@frame` strings for the eight tapped signals, buffered and
-//! flushed with the next line, so the stream is exactly reproducible.
-//!
-//! A failed run (no camera, unopenable file, `require_class` mismatch) prints
-//! `PCAMREC: ...` through `godot_error!` and exits with code `2`; a completed run
-//! prints `PCAMREC: wrote {n} frames to {path}` and exits `0`.
 
 use std::cell::{Cell, RefCell};
 use std::fs::File;
@@ -85,13 +11,8 @@ use std::rc::Rc;
 use godot::classes::{Camera2D, Camera3D, Engine, ProjectSettings};
 use godot::prelude::*;
 
-/// Schema tag written into the header line; `tools/pcam_compare.py` refuses a
-/// stream it does not know.
 pub const SCHEMA: &str = "pcam-record/v1";
 
-/// Signals tapped on the active Phantom Camera. `has_signal()` gates each one, so
-/// a partially ported backend simply produces a shorter stream instead of an
-/// error. Order here only affects connection order, not the recorded stream.
 const TAPPED_SIGNALS: [&str; 8] = [
     "became_active",
     "became_inactive",
@@ -103,60 +24,44 @@ const TAPPED_SIGNALS: [&str; 8] = [
     "noise_emitted",
 ];
 
-/// Decimals kept for every recorded float (fixed precision ⇒ byte-stable JSONL).
 const PRECISION: usize = 9;
 
-/// One frame of camera + Phantom Camera telemetry.
 #[derive(GodotClass)]
 #[class(base=Node, tool)]
 pub struct PcamRecorder {
     base: Base<Node>,
 
-    /// JSONL destination. `user://` and `res://` are globalized through
-    /// `ProjectSettings`; an OS path is used verbatim.
     #[export]
     out_path: GString,
 
-    /// Frames to record, then quit with code 0. `0` records until killed.
     #[export]
     frames: i64,
 
-    /// Camera to observe (`Camera2D` or `Camera3D`). Empty = first camera found
-    /// under the current scene root.
     #[export]
     camera_path: NodePath,
 
-    /// `PhantomCameraHost` to poll for the active Phantom Camera. Empty = first
-    /// node in the tree exposing `get_active_pcam()`.
     #[export]
     host_path: NodePath,
 
-    /// Class name the active Phantom Camera must report (`PhantomCamera2D` /
-    /// `PhantomCamera3D`). This is how the harness proves *which* backend ran: the
-    /// GDScript oracle and the Rust classes both answer through `get_class()`.
     #[export]
     require_class: GString,
 
-    /// Frame index shared with the signal sinks so `name@frame` is stamped with
-    /// the frame the signal belongs to.
     frame: Rc<Cell<i64>>,
-    /// Signals received since the last written line.
+
     emitted: Rc<RefCell<Vec<String>>>,
 
     out: Option<File>,
-    /// Globalized destination, echoed in the header and the log line.
+
     out_display: String,
     camera: Option<Gd<Node>>,
-    /// `2` or `3`; fixed once the camera is resolved.
+
     dims: u8,
     host: Option<Gd<Node>>,
-    /// Phantom Camera currently reported as active.
+
     pcam: Option<Gd<Node>>,
-    /// Phantom Camera the signal sinks are attached to. Kept apart from `pcam` so a
-    /// switch can disconnect the *previous* node after `pcam` already points at the
-    /// new one.
+
     linked: Option<Gd<Node>>,
-    /// `(signal, callable)` pairs connected to `linked`, for a clean reconnect.
+
     links: Vec<(StringName, Callable)>,
     written: i64,
     done: bool,
@@ -188,8 +93,6 @@ impl INode for PcamRecorder {
     }
 
     fn ready(&mut self) {
-        // A `tool` node also runs in the editor, where recording a scene open in
-        // the docks would measure editor gizmo state instead of a game frame.
         if Engine::singleton().is_editor_hint() {
             self.done = true;
             godot_warn!("PCAMREC: editor hint set, not recording (run the scene headless)");
@@ -213,7 +116,6 @@ impl INode for PcamRecorder {
 }
 
 impl PcamRecorder {
-    /// Resolve the observed nodes, open the output and write the header line.
     fn start(&mut self) -> Result<(), String> {
         self.open_output()?;
 
@@ -230,7 +132,6 @@ impl PcamRecorder {
         self.write_line(&header)
     }
 
-    /// One frame: follow an active-camera switch, then write the observation.
     fn tick(&mut self, delta: f64) -> Result<(), String> {
         let active = self.host.as_ref().and_then(active_pcam_of);
         let changed = match (&self.pcam, &active) {
@@ -247,9 +148,7 @@ impl PcamRecorder {
 
         let line = self.frame_line(delta);
         self.write_line(&line)?;
-        // Signals are flushed with the line they were stamped on, exactly like
-        // `_pending.clear()` in the baseline observer; anything emitted later in
-        // this frame lands on the next line.
+
         self.emitted.borrow_mut().clear();
 
         self.frame.set(self.frame.get() + 1);
@@ -262,7 +161,6 @@ impl PcamRecorder {
         Ok(())
     }
 
-    /// Globalize the destination, create its directory and truncate the file.
     fn open_output(&mut self) -> Result<(), String> {
         let global = ProjectSettings::singleton()
             .globalize_path(&self.out_path)
@@ -289,8 +187,6 @@ impl PcamRecorder {
         Ok(())
     }
 
-    /// Camera from `camera_path`, else the first `Camera2D`/`Camera3D` in the
-    /// current scene (tree order), with its dimension.
     fn resolve_camera(&self) -> Result<(Gd<Node>, u8), String> {
         if !self.camera_path.is_empty() {
             let node = self
@@ -317,7 +213,6 @@ impl PcamRecorder {
         Err("no Camera2D/Camera3D under the scene root".to_string())
     }
 
-    /// Host from `host_path`, else the first node exposing `get_active_pcam()`.
     fn resolve_host(&self) -> Option<Gd<Node>> {
         if !self.host_path.is_empty() {
             return self.base().get_node_or_null(&self.host_path);
@@ -329,10 +224,6 @@ impl PcamRecorder {
             .find(|node| node.has_method("get_active_pcam"))
     }
 
-    /// Enforce `require_class` against the active Phantom Camera (and, when none
-    /// is active yet, against any matching node in the tree). A crate that has not
-    /// registered its classes yields "no node of class ...", which the shell driver
-    /// reports as `SKIP (classes not registered)` rather than a mismatch.
     fn check_require_class(&self) -> Result<(), String> {
         if self.require_class.is_empty() {
             return Ok(());
@@ -356,8 +247,6 @@ impl PcamRecorder {
             .any(|node| varcall_class(&node).is_some_and(|class| class == wanted));
 
         if found {
-            // Present but not active yet: the host may still switch to it, and the
-            // frames before the switch record `pcam: null` on both sides.
             return Ok(());
         }
 
@@ -366,7 +255,6 @@ impl PcamRecorder {
         ))
     }
 
-    /// (Re)connect the signal sinks to the current Phantom Camera.
     fn bind_pcam(&mut self) {
         self.unbind_pcam();
 
@@ -396,7 +284,6 @@ impl PcamRecorder {
         self.linked = Some(pcam);
     }
 
-    /// Disconnect every sink attached to the previously bound Phantom Camera.
     fn unbind_pcam(&mut self) {
         let Some(mut pcam) = self.linked.take() else {
             self.links.clear();
@@ -410,8 +297,6 @@ impl PcamRecorder {
         }
     }
 
-    /// The scene root the camera/host are searched under: the scene the runner
-    /// started (`Harness` in the generated scene), else the top of this node's tree.
     fn scene_root(&self) -> Result<Gd<Node>, String> {
         let tree = self.base().get_tree();
 
@@ -426,8 +311,6 @@ impl PcamRecorder {
         Ok(node)
     }
 
-    /// First node in the scene reporting the `require_class` name, used for the
-    /// header before the host has activated anything.
     fn fallback_pcam(&self) -> Option<Gd<Node>> {
         if self.require_class.is_empty() {
             return None;
@@ -439,7 +322,6 @@ impl PcamRecorder {
             .find(|node| varcall_class(node).is_some_and(|class| class == wanted))
     }
 
-    /// Header line: the provenance the comparer reports when a scene diverges.
     fn header_line(&self) -> String {
         let engine = Engine::singleton();
         let version = engine.get_version_info();
@@ -470,9 +352,7 @@ impl PcamRecorder {
             .host
             .as_ref()
             .map_or_else(String::new, |node| node.get_path().to_string());
-        // The host usually activates its first Phantom Camera on its first frame,
-        // after this node's `ready()`. Fall back to the node that satisfies
-        // `require_class` so the header names the same class on both legs.
+
         let pcam = self.pcam.clone().or_else(|| self.fallback_pcam());
         let pcam_class = pcam
             .as_ref()
@@ -507,7 +387,6 @@ impl PcamRecorder {
         )
     }
 
-    /// One frame line, fixed key order: `f, d, pos, rot, scale_zoom, pcam, signals`.
     fn frame_line(&self, delta: f64) -> String {
         let (position, rotation, scale_zoom) = self.camera_telemetry();
 
@@ -531,7 +410,6 @@ impl PcamRecorder {
         )
     }
 
-    /// Camera telemetry for the active dimension (see the module table).
     fn camera_telemetry(&self) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let Some(camera) = self.camera.as_ref() else {
             return (Vec::new(), Vec::new(), Vec::new());
@@ -578,7 +456,6 @@ impl PcamRecorder {
         )
     }
 
-    /// The `pcam` object of a frame line, duck-typed through `try_call()`.
     fn pcam_line(&self, pcam: &Gd<Node>) -> String {
         let active = call_bool(pcam, "is_active");
         let priority = call_int(pcam, "get_priority");
@@ -599,7 +476,6 @@ impl PcamRecorder {
         )
     }
 
-    /// Append one line to the output and flush it, so a crash cannot lose frames.
     fn write_line(&mut self, line: &str) -> Result<(), String> {
         let path = self.out_display.clone();
         let Some(file) = self.out.as_mut() else {
@@ -612,7 +488,6 @@ impl PcamRecorder {
         Ok(())
     }
 
-    /// Close the stream, report the frame count and quit with `0`.
     fn finish(&mut self) {
         self.done = true;
         self.unbind_pcam();
@@ -627,7 +502,6 @@ impl PcamRecorder {
         tree.quit();
     }
 
-    /// Report a fatal recorder error and quit with code `2` (harness exit contract).
     fn abort(&mut self, message: &str) {
         if self.done {
             return;
@@ -642,7 +516,6 @@ impl PcamRecorder {
     }
 }
 
-/// `2` for a `Camera2D`, `3` for a `Camera3D`, `None` for anything else.
 fn camera_dims(node: &Gd<Node>) -> Option<u8> {
     if node.clone().try_cast::<Camera3D>().is_ok() {
         return Some(3);
@@ -653,14 +526,12 @@ fn camera_dims(node: &Gd<Node>) -> Option<u8> {
     None
 }
 
-/// Depth-first node list below (and excluding) `root`, in tree order.
 fn descendants(root: &Gd<Node>) -> Vec<Gd<Node>> {
     let mut found = Vec::new();
     collect_descendants(root, &mut found);
     found
 }
 
-/// Depth-first pre-order walk; scene trees are shallow, so recursion is fine.
 fn collect_descendants(node: &Gd<Node>, found: &mut Vec<Gd<Node>>) {
     for child in node.get_children().iter_shared() {
         found.push(child.clone());
@@ -668,8 +539,6 @@ fn collect_descendants(node: &Gd<Node>, found: &mut Vec<Gd<Node>>) {
     }
 }
 
-/// `get_class()` through a *varcall*, so a GDScript override is honoured (see the
-/// module docs). `None` when the object is gone or does not answer with a string.
 fn varcall_class(node: &Gd<Node>) -> Option<String> {
     let mut node = node.clone();
     let value = node.try_call("get_class", &[]).ok()?;
@@ -679,7 +548,6 @@ fn varcall_class(node: &Gd<Node>) -> Option<String> {
         .map(|class| class.to_string())
 }
 
-/// `host.get_active_pcam()`; `None` when absent, null or already freed.
 fn active_pcam_of(host: &Gd<Node>) -> Option<Gd<Node>> {
     let mut host = host.clone();
     let value = host.try_call("get_active_pcam", &[]).ok()?;
@@ -692,7 +560,6 @@ fn active_pcam_of(host: &Gd<Node>) -> Option<Gd<Node>> {
     }
 }
 
-/// Call a no-argument predicate; `None` when the method is missing or throws.
 fn call_bool(node: &Gd<Node>, method: &str) -> Option<bool> {
     if !node.has_method(method) {
         return None;
@@ -701,7 +568,6 @@ fn call_bool(node: &Gd<Node>, method: &str) -> Option<bool> {
     node.try_call(method, &[]).ok()?.try_to::<bool>().ok()
 }
 
-/// Call a no-argument integer getter; `None` when the method is missing.
 fn call_int(node: &Gd<Node>, method: &str) -> Option<i64> {
     if !node.has_method(method) {
         return None;
@@ -710,8 +576,6 @@ fn call_int(node: &Gd<Node>, method: &str) -> Option<i64> {
     node.try_call(method, &[]).ok()?.try_to::<i64>().ok()
 }
 
-/// Call a no-argument `Transform2D`/`Transform3D` getter and flatten it to floats
-/// (6 for 2D, 12 for 3D); `None` when the method is missing or returns another type.
 fn call_transform(node: &Gd<Node>, method: &str) -> Option<Vec<f64>> {
     if !node.has_method(method) {
         return None;
@@ -753,8 +617,6 @@ fn call_transform(node: &Gd<Node>, method: &str) -> Option<Vec<f64>> {
     None
 }
 
-/// A float with fixed precision; non-finite values become JSON `null` so the
-/// comparer can report them instead of failing to parse the line.
 fn json_float(value: f64) -> String {
     if value.is_finite() {
         format!("{:.*}", PRECISION, value)
@@ -763,7 +625,6 @@ fn json_float(value: f64) -> String {
     }
 }
 
-/// `[a,b,...]` with fixed precision.
 fn json_floats(values: &[f64]) -> String {
     let mut out = String::with_capacity(values.len() * (PRECISION + 4) + 2);
     out.push('[');
@@ -777,22 +638,18 @@ fn json_floats(values: &[f64]) -> String {
     out
 }
 
-/// `[...]`, or `null` when the getter was missing.
 fn json_optional_floats(values: Option<&[f64]>) -> String {
     values.map_or_else(|| "null".to_string(), json_floats)
 }
 
-/// `true`/`false`, or `null` when the getter was missing.
 fn json_optional_bool(value: Option<bool>) -> String {
     value.map_or_else(|| "null".to_string(), |flag| flag.to_string())
 }
 
-/// An integer, or `null` when the getter was missing.
 fn json_optional_int(value: Option<i64>) -> String {
     value.map_or_else(|| "null".to_string(), |number| number.to_string())
 }
 
-/// `["a","b"]` with JSON escaping.
 fn json_strings(values: &[String]) -> String {
     let mut out = String::from("[");
     for (index, value) in values.iter().enumerate() {
@@ -807,8 +664,6 @@ fn json_strings(values: &[String]) -> String {
     out
 }
 
-/// Minimal JSON string escaping (paths and node paths only carry `\`, `"` and
-/// control characters; everything else is passed through).
 fn json_escape(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for character in value.chars() {
