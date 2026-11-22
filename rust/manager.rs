@@ -11,7 +11,7 @@
 //! for the whole game, and from then on each part simply announces that it exists
 //! and hears about the others.
 //!
-//! Responsibility: it keeps the lists of the parts currently in the tree, relays
+//! Responsibility: it keeps the lists of the parts that are in the tree, relays
 //! their announcements (a change of priority, a teleport, a burst of shake, a new
 //! camera limit) to whoever listens, and tracks the screen size the framing maths
 //! needs. It makes no camera decision itself; choosing the live camera and moving

@@ -7,8 +7,8 @@
 //! camera that renders it.
 //!
 //! Intent: a scene author places one of these under a real camera and then never
-//! drives that camera by hand again. Whichever virtual camera currently matters most
-//! decides what the real camera sees, and a change of shot glides from the old
+//! drives that camera by hand again. Whichever virtual camera matters most at a given
+//! moment decides what the real camera sees, and a change of shot glides from the old
 //! framing to the new one instead of cutting.
 //!
 //! Responsibility: it decides which virtual camera is live, by priority, visibility
@@ -25,6 +25,10 @@
 //! Why a new type: a built-in camera has one fixed framing and no notion of
 //! competing shots, and pushing the arbitration into the virtual cameras would make
 //! every one of them argue with every other about who owns the real camera.
+//!
+//! It builds no nodes. The lens settings and the collision shape it gives the real
+//! camera are resources made at run time, because they copy whichever virtual camera
+//! is live, and which one that is, and how it is set, is only known while playing.
 
 #![expect(
     clippy::collapsible_if,
