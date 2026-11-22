@@ -25,10 +25,10 @@
 //! does not render, so any number can coexist and compete.
 //!
 //! A shot that stays behind a character needs an arm that pulls it in front of
-//! scenery, and the arm has to wrap the shot itself. The file builds that arm when
-//! the game starts, only for shots set to behave that way, so the behaviour stays a
-//! setting the designer chooses instead of a tree structure every such shot must
-//! repeat by hand.
+//! scenery, wrapped around the shot itself. The file builds that arm when such a
+//! shot first becomes ready in a running game, and only for shots set to behave
+//! that way: whether a shot needs one is a setting that can differ per shot, not
+//! part of the structure a scene declares around it.
 
 #![expect(
     clippy::collapsible_if,
@@ -583,7 +583,6 @@ impl PhantomCamera3D {
 
         let mut arm = SpringArm3D::new_alloc();
 
-        self.follow_spring_arm = Some(arm.clone());
         arm.set("top_level", &true.to_variant());
 
         arm.set_length(real_of(self.follow_distance));
@@ -615,6 +614,7 @@ impl PhantomCamera3D {
             }
         }
 
+        self.follow_spring_arm = Some(arm.clone());
         self.pending_spring_arm = Some((arm, initial_rotation));
     }
 
