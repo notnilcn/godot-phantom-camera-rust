@@ -3,7 +3,33 @@
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera_host/phantom_camera_host.gd
 //
 
-#![allow(clippy::collapsible_if)]
+//! The bridge between the virtual cameras a level is authored with and the one real
+//! camera that renders it.
+//!
+//! Intent: a scene author places one of these under a real camera and then never
+//! drives that camera by hand again. Whichever virtual camera currently matters most
+//! decides what the real camera sees, and a change of shot glides from the old
+//! framing to the new one instead of cutting.
+//!
+//! Responsibility: it decides which virtual camera is live, by priority, visibility
+//! and layer, and it owns the transition between two of them: the blend of position,
+//! rotation, zoom and lens settings, the shake added on top, and the timing of
+//! the whole frame update relative to physics. It does not decide how any one
+//! virtual camera frames its subject; each of those works out its own framing and
+//! the bridge only reads the result. It keeps no registry of its own either; it
+//! learns which virtual cameras exist from the addon's shared registry.
+//!
+//! Why a node: it has to sit under the real camera it drives, follow the engine's
+//! frame and physics ticks, and react when cameras enter and leave the tree.
+//!
+//! Why a new type: a built-in camera has one fixed framing and no notion of
+//! competing shots, and pushing the arbitration into the virtual cameras would make
+//! every one of them argue with every other about who owns the real camera.
+
+#![expect(
+    clippy::collapsible_if,
+    reason = "the nested branches follow the upstream addon branch for branch, so the port can be compared with it block by block"
+)]
 use godot::builtin::math::ApproxEq;
 use godot::builtin::{Quaternion, Transform2D, Transform3D, Variant, Vector2, Vector3};
 use godot::classes::{
@@ -236,7 +262,10 @@ pub struct PhantomCameraHost {
     tween_ease: i64,
     tween_is_instant: bool,
 
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "mirrors upstream state that only its omitted editor paths read"
+    )]
     multiple_pcam_hosts: bool,
     is_child_of_camera: bool,
     is_2d: bool,
@@ -248,7 +277,10 @@ pub struct PhantomCameraHost {
     noise_emitted_output_2d: Transform2D,
     noise_emitted_output_3d: Transform3D,
 
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "mirrors upstream state that only its omitted editor paths read"
+    )]
     show_warning: bool,
     pub camera_2d: Option<Gd<Camera2D>>,
     pub camera_3d: Option<Gd<Camera3D>>,

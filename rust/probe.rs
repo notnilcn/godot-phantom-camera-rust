@@ -2,6 +2,21 @@
 // Copyright (C) 2026 Khvor' Gates contributors
 //
 
+//! A marker that proves the camera addon's compiled library is loaded.
+//!
+//! Intent: a check scene or a test harness instantiates it and asks it what it is.
+//! If the library is missing or stale, that shows up as one clear failure instead of
+//! a wall of unknown-type errors in every scene that uses the addon.
+//!
+//! Responsibility: it reports which port and which upstream release are loaded and
+//! which types the library provides. It does nothing else.
+//!
+//! Why a node: what it proves is that the library's node types resolve when a scene
+//! loads, so it has to be one of them and be loaded the same way.
+//!
+//! Why a new type: a built-in node would load whether or not the library did, and
+//! asking one of the real camera types would drag their side effects into a check.
+
 use godot::prelude::*;
 
 pub const PORTS_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -3,6 +3,24 @@
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_tween_director.gd
 //
 
+//! A place to say how particular changes of shot should look, instead of letting
+//! every transition use the target camera's own setting.
+//!
+//! Intent: a designer who wants a slow pan from the overview into the action, but a
+//! hard cut back out, adds one of these to the scene and lists those exceptions. The
+//! cameras stay untouched.
+//!
+//! Responsibility: it holds the designer's list of transition overrides and makes
+//! them known to the addon while it is in the tree. Picking and running a transition
+//! stays with the bridge under the real camera.
+//!
+//! Why a node: the overrides belong to a scene, and they should apply exactly while
+//! that scene is loaded, which the tree already tracks.
+//!
+//! Why a new type: a resource alone has no presence in the tree to come and go with
+//! a scene, and putting the overrides on the cameras would split one rule about a
+//! pair of shots across both of them.
+
 use godot::classes::{INode, Node};
 use godot::prelude::*;
 

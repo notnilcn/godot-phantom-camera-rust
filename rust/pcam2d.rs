@@ -3,7 +3,31 @@
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_2d.gd
 //
 
-#![allow(clippy::collapsible_if)]
+//! A virtual camera for 2D scenes: one shot a level designer can place, aim and
+//! prioritise without touching the real camera.
+//!
+//! Intent: the designer describes a way of looking at the level, such as staying
+//! on the player, framing a group, gliding along a path or holding a fixed spot,
+//! and gives it a priority. When it becomes the most important shot, the view takes
+//! on its framing, its zoom, its limits and its shake.
+//!
+//! Responsibility: it works out where its shot should be every frame, including
+//! damping, dead zones, look-ahead and the edges the view may not cross, and it
+//! reports when it becomes live, starts or finishes a transition, or reaches an
+//! edge. It does not move the real camera and does not decide whether it is the live
+//! shot; the bridge under the real camera does both.
+//!
+//! Why a node: a shot has a place and a transform in the level, it follows other
+//! nodes in the tree, and the designer moves it in the editor like any other object.
+//!
+//! Why a new type: a built-in camera can only be the one active view, so a level
+//! with many authored shots would need code to swap them; this node is a shot that
+//! does not render, so any number can coexist and compete.
+
+#![expect(
+    clippy::collapsible_if,
+    reason = "the nested branches follow the upstream addon branch for branch, so the port can be compared with it block by block"
+)]
 use godot::builtin::{Array, NodePath, Rect2, Transform2D, Vector2, Vector2i, Vector4, Vector4i};
 use godot::classes::{CollisionShape2D, Engine, Node2D, Path2D, TileMapLayer};
 use godot::prelude::*;
@@ -452,8 +476,21 @@ impl PhantomCamera2D {
     pub fn pcam_noise_emitted(&mut self, emitter_noise_output: Transform2D, emitter_layer: i64) {
         if self.noise_emitter_layer & emitter_layer != 0 {
             self.signals().noise_emitted().emit(emitter_noise_output);
-            self.pending_noise = Some(emitter_noise_output);
+            if self.is_active_pcam {
+                self.pending_noise = Some(emitter_noise_output);
+            }
         }
+    }
+
+    fn connect_noise_emitted(&self) {
+        let Some(manager) = PhantomCameraManager::active() else {
+            return;
+        };
+        let this = self.to_gd();
+        manager
+            .signals()
+            .noise_2d_emitted()
+            .connect_other(&this, Self::pcam_noise_emitted);
     }
 
     fn enter_tree_impl(&mut self) {
@@ -496,6 +533,8 @@ impl PhantomCamera2D {
     }
 
     fn ready_impl(&mut self) {
+        self.connect_noise_emitted();
+
         self.transform_output = self.base().get_global_transform();
         if !Engine::singleton().is_editor_hint() {
             self._preview_noise = true;

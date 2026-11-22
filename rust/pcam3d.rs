@@ -3,7 +3,37 @@
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_3d.gd
 //
 
-#![allow(clippy::collapsible_if)]
+//! A virtual camera for 3D scenes: one shot a level designer can place, aim and
+//! prioritise without touching the real camera.
+//!
+//! Intent: the designer describes a way of looking at the world, such as following
+//! a subject, framing a group, orbiting behind a character, riding a path or simply
+//! watching from a fixed spot, and gives it a priority. When it becomes the most
+//! important shot, the view takes on its framing, its lens and its shake.
+//!
+//! Responsibility: it works out where its shot should be and where it should point
+//! every frame, including damping, dead zones, axis locks and collision with scenery
+//! for a camera behind a character, and it reports when it becomes live or starts or
+//! finishes a transition. It does not move the real camera and does not decide
+//! whether it is the live shot; the bridge under the real camera does both.
+//!
+//! Why a node: a shot has a place and a transform in the world, it follows other
+//! nodes in the tree, and the designer moves it in the editor like any other object.
+//!
+//! Why a new type: a built-in camera can only be the one active view, so a world
+//! with many authored shots would need code to swap them; this node is a shot that
+//! does not render, so any number can coexist and compete.
+//!
+//! A shot that stays behind a character needs an arm that pulls it in front of
+//! scenery, and the arm has to wrap the shot itself. The file builds that arm when
+//! the game starts, only for shots set to behave that way, so the behaviour stays a
+//! setting the designer chooses instead of a tree structure every such shot must
+//! repeat by hand.
+
+#![expect(
+    clippy::collapsible_if,
+    reason = "the nested branches follow the upstream addon branch for branch, so the port can be compared with it block by block"
+)]
 use godot::builtin::math::ApproxEq;
 use godot::builtin::{Array, Transform3D, Vector2, Vector3};
 use godot::classes::{Engine, Node3D, Path3D, Shape3D, SpringArm3D};
@@ -328,7 +358,6 @@ pub struct PhantomCamera3D {
     follow_target_position: Vector3,
     draw_look_at_gizmo_line: bool,
 
-    #[allow(dead_code)]
     look_at_target_physics_based: bool,
 
     pending_noise: Option<Transform3D>,
@@ -341,7 +370,6 @@ pub struct PhantomCamera3D {
     tween_transition_fallback: i64,
     tween_ease_fallback: i64,
 
-    #[allow(dead_code)]
     keep_aspect_value: i64,
     pub viewport_position: Vector2,
 }
@@ -452,8 +480,21 @@ impl PhantomCamera3D {
     pub fn pcam_noise_emitted(&mut self, emitter_noise_output: Transform3D, emitter_layer: i64) {
         if self.noise_emitter_layer & emitter_layer != 0 {
             self.signals().noise_emitted().emit(emitter_noise_output);
-            self.pending_noise = Some(emitter_noise_output);
+            if self.is_active_pcam {
+                self.pending_noise = Some(emitter_noise_output);
+            }
         }
+    }
+
+    fn connect_noise_emitted(&self) {
+        let Some(manager) = PhantomCameraManager::active() else {
+            return;
+        };
+        let this = self.to_gd();
+        manager
+            .signals()
+            .noise_3d_emitted()
+            .connect_other(&this, Self::pcam_noise_emitted);
     }
 
     fn enter_tree_impl(&mut self) {
@@ -507,6 +548,8 @@ impl PhantomCamera3D {
     }
 
     fn ready_impl(&mut self) {
+        self.connect_noise_emitted();
+
         match self.follow_mode {
             6 => {
                 self.is_third_person_follow = true;

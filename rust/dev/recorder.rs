@@ -2,6 +2,27 @@
 // Copyright (C) 2026 Khvor' Gates contributors
 //
 
+//! A development probe that records what the cameras did, frame by frame, so two
+//! implementations of the addon can be compared on the same scene.
+//!
+//! Intent: a parity run places it in a test scene, lets the scene play for a while,
+//! and gets a line per frame of camera state and camera events to compare against a
+//! reference run. It is never part of a shipped game scene.
+//!
+//! Responsibility: it finds the real camera and the bridge driving it, follows
+//! whichever virtual camera is live, listens to its events, and writes the record.
+//! It touches every camera only by name and never through this library's own types,
+//! so it measures any implementation of the addon, including one written in a
+//! scripting language, and still works when this library's camera types are absent.
+//! It never changes what it observes.
+//!
+//! Why a node: it has to see the frame after the cameras have moved, hear their
+//! signals, and run inside the scene it measures.
+//!
+//! Why a new type: no built-in node records engine state to a file, and putting the
+//! recording in the camera types would make the measurement depend on the thing
+//! being measured.
+
 use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::Write;
