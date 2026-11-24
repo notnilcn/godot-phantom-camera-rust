@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_noise_emitter_2d.gd, phantom_camera_noise_emitter_3d.gd
+
 use godot::classes::{INode2D, INode3D, Node2D, Node3D};
 use godot::global::randi;
 use godot::prelude::*;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
+
 use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::Write;

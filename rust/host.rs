@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera_host/phantom_camera_host.gd
-#![allow(clippy::collapsible_if)]
+
+#![expect(
+    clippy::collapsible_if,
+    reason = "the nested branches follow the upstream addon branch for branch, so the port can be compared with it block by block"
+)]
 use godot::builtin::math::ApproxEq;
 use godot::builtin::{Quaternion, Transform2D, Transform3D, Variant, Vector2, Vector3};
 use godot::classes::{
@@ -230,7 +234,10 @@ pub struct PhantomCameraHost {
     tween_transition: i64,
     tween_ease: i64,
     tween_is_instant: bool,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "mirrors upstream state that only its omitted editor paths read"
+    )]
     multiple_pcam_hosts: bool,
     is_child_of_camera: bool,
     is_2d: bool,
@@ -241,7 +248,10 @@ pub struct PhantomCameraHost {
     reset_noise_offset_2d: bool,
     noise_emitted_output_2d: Transform2D,
     noise_emitted_output_3d: Transform3D,
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "mirrors upstream state that only its omitted editor paths read"
+    )]
     show_warning: bool,
     pub camera_2d: Option<Gd<Camera2D>>,
     pub camera_3d: Option<Gd<Camera3D>>,
@@ -559,6 +569,11 @@ impl PhantomCameraHost {
         candidate.set_tween_skip(false);
     }
 
+    fn with_base_released<R>(&mut self, call: impl FnOnce() -> R) -> R {
+        let _released = self.base_mut();
+        call()
+    }
+
     fn assign_new_active_pcam(&mut self, pcam: &Gd<Node>) {
         if !self.base().is_inside_tree() {
             return;
@@ -580,13 +595,15 @@ impl PhantomCameraHost {
                     }
                     active.queue_redraw();
                     active.bind_mut().host_set_active(false);
-                    active.bind_mut().emit_became_inactive();
+                    self.with_base_released(|| active.bind_mut().emit_became_inactive());
                     self.signals()
                         .pcam_became_inactive()
                         .emit(&active.clone().upcast::<Node>());
                     if self.trigger_pcam_tween {
                         if let Some(AnyPcam::TwoD(new_pcam_2d)) = &new_pcam {
-                            active.bind_mut().emit_tween_interrupted(new_pcam_2d);
+                            self.with_base_released(|| {
+                                active.bind_mut().emit_tween_interrupted(new_pcam_2d)
+                            });
                         }
                     }
                 }
@@ -596,16 +613,18 @@ impl PhantomCameraHost {
                         self.prev_active_pcam_3d_transform = camera.get_global_transform();
                     }
                     active.clone().bind_mut().host_set_active(false);
-                    active.clone().bind_mut().emit_became_inactive();
+                    self.with_base_released(|| active.clone().bind_mut().emit_became_inactive());
                     self.signals()
                         .pcam_became_inactive()
                         .emit(&active.clone().upcast::<Node>());
                     if self.trigger_pcam_tween {
                         if let Some(AnyPcam::ThreeD(new_pcam_3d)) = &new_pcam {
-                            active
-                                .clone()
-                                .bind_mut()
-                                .emit_tween_interrupted(new_pcam_3d);
+                            self.with_base_released(|| {
+                                active
+                                    .clone()
+                                    .bind_mut()
+                                    .emit_tween_interrupted(new_pcam_3d)
+                            });
                         }
                     }
 
@@ -654,7 +673,7 @@ impl PhantomCameraHost {
         if self.is_2d {
             if let Some(mut active) = self.active_pcam_2d.clone() {
                 active.bind_mut().host_set_active(true);
-                active.bind_mut().emit_became_active();
+                self.with_base_released(|| active.bind_mut().emit_became_active());
                 self.signals()
                     .pcam_became_active()
                     .emit(&active.clone().upcast::<Node>());
@@ -664,7 +683,7 @@ impl PhantomCameraHost {
             }
         } else if let Some(mut active) = self.active_pcam_3d.clone() {
             active.bind_mut().host_set_active(true);
-            active.bind_mut().emit_became_active();
+            self.with_base_released(|| active.bind_mut().emit_became_active());
             self.signals()
                 .pcam_became_active()
                 .emit(&active.clone().upcast::<Node>());
@@ -1274,7 +1293,7 @@ impl PhantomCameraHost {
                 self.active_pcam_missing = true;
                 return;
             };
-            active.clone().bind_mut().process_logic(delta);
+            self.with_base_released(|| active.clone().bind_mut().process_logic(delta));
             self.active_pcam_2d_glob_transform = active.bind().get_transform_output();
 
             if self.reset_noise_offset_2d {
@@ -1288,7 +1307,7 @@ impl PhantomCameraHost {
                 self.active_pcam_missing = true;
                 return;
             };
-            active.clone().bind_mut().process_logic(delta);
+            self.with_base_released(|| active.clone().bind_mut().process_logic(delta));
             self.active_pcam_3d_glob_transform = active.clone().bind().get_transform_output();
         }
 
@@ -1405,11 +1424,11 @@ impl PhantomCameraHost {
         if self.tween_elapsed_time == 0.0 {
             if self.is_2d {
                 if let Some(mut active) = self.active_pcam_2d.clone() {
-                    active.bind_mut().emit_tween_started();
+                    self.with_base_released(|| active.bind_mut().emit_tween_started());
                     active.call_deferred("reset_limit", &[]);
                 }
             } else if let Some(mut active) = self.active_pcam_3d.clone() {
-                active.bind_mut().emit_tween_started();
+                self.with_base_released(|| active.bind_mut().emit_tween_started());
             }
         }
 
@@ -1449,7 +1468,7 @@ impl PhantomCameraHost {
         if self.is_2d {
             if let Some(mut active) = self.active_pcam_2d.clone() {
                 active.call_deferred("update_limit_all_sides", &[]);
-                active.bind_mut().emit_tween_completed();
+                self.with_base_released(|| active.bind_mut().emit_tween_completed());
                 active.bind_mut().host_set_tween_skip(false);
             }
         } else {
@@ -1476,7 +1495,7 @@ impl PhantomCameraHost {
                 self.cam_attribute_changed = false;
 
                 active.clone().bind_mut().host_set_tween_skip(false);
-                active.clone().bind_mut().emit_tween_completed();
+                self.with_base_released(|| active.clone().bind_mut().emit_tween_completed());
             }
         }
     }
@@ -1501,7 +1520,7 @@ impl PhantomCameraHost {
         let Some(mut camera) = self.camera_2d.clone() else {
             return;
         };
-        active.clone().bind_mut().emit_is_tweening();
+        self.with_base_released(|| active.clone().bind_mut().emit_is_tweening());
 
         let (elapsed, duration, transition, ease) = self.tween_params();
         let destination = tween_interp_v2(
@@ -1546,7 +1565,7 @@ impl PhantomCameraHost {
         let Some(mut camera) = self.camera_3d.clone() else {
             return;
         };
-        active.clone().bind_mut().emit_is_tweening();
+        self.with_base_released(|| active.clone().bind_mut().emit_is_tweening());
 
         let (elapsed, duration, transition, ease) = self.tween_params();
 

@@ -137,7 +137,10 @@ pub fn interpolate_value_v3(
     .unwrap_or(from + delta)
 }
 
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "kept as the zoom leg of the upstream tween pump for the parity harness"
+)]
 pub fn interpolate_value_zoom(
     from: Vector2,
     to: Vector2,

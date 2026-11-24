@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
+
 use godot::prelude::*;
 
 pub const PORTS_VERSION: &str = env!("CARGO_PKG_VERSION");

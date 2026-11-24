@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_3d.gd
-#![allow(clippy::collapsible_if)]
+
+#![expect(
+    clippy::collapsible_if,
+    reason = "the nested branches follow the upstream addon branch for branch, so the port can be compared with it block by block"
+)]
 use godot::builtin::math::ApproxEq;
 use godot::builtin::{Array, Transform3D, Vector2, Vector3};
 use godot::classes::{Engine, Node3D, Path3D, Shape3D, SpringArm3D};
@@ -277,7 +281,6 @@ pub struct PhantomCamera3D {
     draw_follow_gizmo_line: bool,
     follow_target_position: Vector3,
     draw_look_at_gizmo_line: bool,
-    #[allow(dead_code)]
     look_at_target_physics_based: bool,
     pending_noise: Option<Transform3D>,
     pending_spring_arm: Option<(Gd<SpringArm3D>, Vector3)>,
@@ -286,7 +289,6 @@ pub struct PhantomCamera3D {
     tween_duration_fallback: f64,
     tween_transition_fallback: i64,
     tween_ease_fallback: i64,
-    #[allow(dead_code)]
     keep_aspect_value: i64,
     pub viewport_position: Vector2,
 }
@@ -396,8 +398,21 @@ impl PhantomCamera3D {
     pub fn pcam_noise_emitted(&mut self, emitter_noise_output: Transform3D, emitter_layer: i64) {
         if self.noise_emitter_layer & emitter_layer != 0 {
             self.signals().noise_emitted().emit(emitter_noise_output);
-            self.pending_noise = Some(emitter_noise_output);
+            if self.is_active_pcam {
+                self.pending_noise = Some(emitter_noise_output);
+            }
         }
+    }
+
+    fn connect_noise_emitted(&self) {
+        let Some(manager) = PhantomCameraManager::active() else {
+            return;
+        };
+        let this = self.to_gd();
+        manager
+            .signals()
+            .noise_3d_emitted()
+            .connect_other(&this, Self::pcam_noise_emitted);
     }
 
     fn enter_tree_impl(&mut self) {
@@ -450,6 +465,8 @@ impl PhantomCamera3D {
     }
 
     fn ready_impl(&mut self) {
+        self.connect_noise_emitted();
+
         match self.follow_mode {
             6 => {
                 self.is_third_person_follow = true;
@@ -482,7 +499,6 @@ impl PhantomCamera3D {
         }
 
         let mut arm = SpringArm3D::new_alloc();
-        self.follow_spring_arm = Some(arm.clone());
         arm.set("top_level", &true.to_variant());
         arm.set_length(real_of(self.follow_distance));
         arm.set_collision_mask(self.collision_mask as u32);
@@ -513,6 +529,7 @@ impl PhantomCamera3D {
             }
         }
 
+        self.follow_spring_arm = Some(arm.clone());
         self.pending_spring_arm = Some((arm, initial_rotation));
     }
 

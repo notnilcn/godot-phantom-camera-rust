@@ -14,7 +14,7 @@ fn real_of(value: f64) -> real {
 }
 
 #[derive(GodotClass)]
-#[class(base=Resource)]
+#[class(base=Resource, tool)]
 pub struct PhantomCameraTween {
     base: Base<Resource>,
 

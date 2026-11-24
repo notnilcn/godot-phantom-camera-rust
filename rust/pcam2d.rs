@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_2d.gd
-#![allow(clippy::collapsible_if)]
+
+#![expect(
+    clippy::collapsible_if,
+    reason = "the nested branches follow the upstream addon branch for branch, so the port can be compared with it block by block"
+)]
 use godot::builtin::{Array, NodePath, Rect2, Transform2D, Vector2, Vector2i, Vector4, Vector4i};
 use godot::classes::{CollisionShape2D, Engine, Node2D, Path2D, TileMapLayer};
 use godot::prelude::*;
@@ -403,8 +407,21 @@ impl PhantomCamera2D {
     pub fn pcam_noise_emitted(&mut self, emitter_noise_output: Transform2D, emitter_layer: i64) {
         if self.noise_emitter_layer & emitter_layer != 0 {
             self.signals().noise_emitted().emit(emitter_noise_output);
-            self.pending_noise = Some(emitter_noise_output);
+            if self.is_active_pcam {
+                self.pending_noise = Some(emitter_noise_output);
+            }
         }
+    }
+
+    fn connect_noise_emitted(&self) {
+        let Some(manager) = PhantomCameraManager::active() else {
+            return;
+        };
+        let this = self.to_gd();
+        manager
+            .signals()
+            .noise_2d_emitted()
+            .connect_other(&this, Self::pcam_noise_emitted);
     }
 
     fn enter_tree_impl(&mut self) {
@@ -446,6 +463,8 @@ impl PhantomCamera2D {
     }
 
     fn ready_impl(&mut self) {
+        self.connect_noise_emitted();
+
         self.transform_output = self.base().get_global_transform();
         if !Engine::singleton().is_editor_hint() {
             self._preview_noise = true;

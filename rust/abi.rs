@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_constants.gd
-#![allow(dead_code)]
+
+#![expect(
+    dead_code,
+    reason = "the constant table mirrors the upstream addon's whole public surface, including values the port never reads"
+)]
+
 pub const PCAM_MANAGER_NODE_NAME: &str = "PhantomCameraManager";
 
 pub const PCAM_GROUP_NAME: &str = "phantom_camera_group";
@@ -142,7 +147,10 @@ pub enum TransitionType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i64)]
-#[allow(clippy::enum_variant_names)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "the variants mirror the engine's own easing names"
+)]
 pub enum EaseType {
     EaseIn = 0,
     EaseOut = 1,

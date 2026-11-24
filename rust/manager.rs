@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/managers/phantom_camera_manager.gd
-#![allow(non_snake_case)]
+
+#![expect(
+    non_snake_case,
+    reason = "signal argument names are scene-facing and keep the upstream addon's spelling"
+)]
 
 use godot::classes::{Control, Engine, INode, Node, ProjectSettings, SceneTree};
 use godot::prelude::*;
@@ -121,10 +125,10 @@ impl PhantomCameraManager {
     }
 
     #[signal]
-    fn noise_2d_emitted(noise_output: Transform2D, emitter_layer: i64);
+    pub(crate) fn noise_2d_emitted(noise_output: Transform2D, emitter_layer: i64);
 
     #[signal]
-    fn noise_3d_emitted(noise_output: Transform3D, emitter_layer: i64);
+    pub(crate) fn noise_3d_emitted(noise_output: Transform3D, emitter_layer: i64);
 
     #[signal]
     fn pcam_host_added_to_scene(pcam_host: Gd<Node>);
@@ -172,8 +176,7 @@ impl PhantomCameraManager {
     fn pcam_host_added(&mut self, caller: Gd<Node>) {
         if caller.is_class("PhantomCameraHost") {
             self.phantom_camera_hosts.push(&caller);
-            let this = self.to_gd();
-            emit_on(&this, "pcam_host_added_to_scene", &[caller.to_variant()]);
+            self.emit_reentrant("pcam_host_added_to_scene", &[caller.to_variant()]);
         } else {
             godot_error!("This method can only be called from a PhantomCameraHost node");
         }
@@ -183,12 +186,7 @@ impl PhantomCameraManager {
     fn pcam_host_removed(&mut self, caller: Gd<Node>) {
         if caller.is_class("PhantomCameraHost") {
             self.phantom_camera_hosts.erase(&caller);
-            let this = self.to_gd();
-            emit_on(
-                &this,
-                "pcam_host_removed_from_scene",
-                &[caller.to_variant()],
-            );
+            self.emit_reentrant("pcam_host_removed_from_scene", &[caller.to_variant()]);
         } else {
             godot_error!("This method can only be called from a PhantomCameraHost node");
         }
@@ -209,8 +207,7 @@ impl PhantomCameraManager {
             return;
         };
         self.push_pcam_registry(kind, &pcam);
-        let this = self.to_gd();
-        emit_on(&this, "pcam_added_to_scene", &[pcam.to_variant()]);
+        self.emit_reentrant("pcam_added_to_scene", &[pcam.to_variant()]);
     }
 
     #[func]
@@ -228,8 +225,7 @@ impl PhantomCameraManager {
             return;
         };
         self.erase_pcam_registry(kind, &pcam);
-        let this = self.to_gd();
-        emit_on(&this, "pcam_removed_from_scene", &[pcam.to_variant()]);
+        self.emit_reentrant("pcam_removed_from_scene", &[pcam.to_variant()]);
     }
 
     #[func]
@@ -289,6 +285,10 @@ impl PhantomCameraManager {
 }
 
 impl PhantomCameraManager {
+    fn emit_reentrant(&mut self, signal: &str, args: &[Variant]) {
+        let _ = self.base_mut().emit_signal(signal, args);
+    }
+
     fn push_pcam_registry(&mut self, kind: PcamKind, pcam: &Gd<Node>) {
         match kind {
             PcamKind::TwoD => self.phantom_camera_2ds.push(pcam),
