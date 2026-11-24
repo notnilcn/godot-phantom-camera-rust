@@ -1,21 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/**
-//
-//! `phantom_camera_rust` — a Rust GDExtension port of the Phantom Camera addon
-//! (`addons/phantom_camera/`, v0.11.0.3) for Godot 4.7.
-//!
-//! Ported from: `addons/phantom_camera/scripts/**` (Marcus Skov, MIT — the
-//! upstream `LICENSE` ships beside this addon). The original GDScript addon is
-//! kept outside the Godot project as the read-only parity oracle; this
-//! crate is the shipped implementation.
-//!
-//! Class names, exported property names, signal signatures and enum values are
-//! the scene ABI (`*.tscn` files name classes and store properties as strings),
-//! so they are ported verbatim and never change shape. `abi.rs` holds the frozen
-//! enum/constant table; `PORT-PLAN.md` beside the `.gdextension` holds the
-//! contract every module in this crate follows.
-
 use godot::prelude::*;
 
 mod abi;
@@ -42,11 +27,6 @@ pub use resources::{
 };
 pub use tween_director::PhantomCameraTweenDirector;
 
-/// Every Godot class name this library registers.
-///
-/// Kept as an explicit list so the parity harness can assert the full class
-/// surface without guessing, and so a forgotten `mod` shows up as a mismatched
-/// count rather than a runtime "unknown class" parse error in a scene.
 pub const REGISTERED_CLASSES: &[&str] = &[
     "PhantomCamera2D",
     "PhantomCamera3D",

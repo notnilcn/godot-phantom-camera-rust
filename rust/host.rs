@@ -1,35 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera_host/phantom_camera_host.gd
-//
-//! `PhantomCameraHost` — priority arbitration, activation, and the per-frame pump.
-//!
-//! Ported from `addons/phantom_camera/scripts/phantom_camera_host/phantom_camera_host.gd`
-//! (v0.11.0.3, MIT, Marcus Skov), preserved as the read-only parity oracle. All
-//! `:NNN` anchors below are lines of that file.
-//!
-//! Algorithm anchors:
-//! - lifecycle `:261-342` (note the `await get_tree().process_frame` at `:304`)
-//! - priority arbitration `:369-405`, `:1335-1371`, `:1296-1301`, `:1421-1423`
-//! - `_assign_new_active_pcam` `:407-704` (signal order + the `_prev_cam_*` snapshot)
-//! - tween value selection `:707-796`
-//! - physics/idle split `:799-829`, `:850-858`
-//! - per-frame pump `:861-903`, `:906-928`, `:970-1218`
-//! - `Tween.interpolate_value` wrapper `:1221-1229`
-//!
-//! Omitted (editor-only): `_get_configuration_warnings` `:230-258`, the inspector
-//! `property_edited` guard `:564-566` / `:941-964`, and the viewfinder panel
-//! plumbing `:1232-1258`. Each is marked `// parity:` at the use site.
-//!
-//! Engine property plumbing (`Camera3D` + `CameraAttributes*` snapshots, diffs and
-//! tween writes) is routed through `Object::get`/`Object::set` by property name. The
-//! oracle does the same thing dynamically and 3D's `CameraAttributesPhysical` /
-//! `CameraAttributesPractical` surface is ~30 typed accessors; a name-keyed read is
-//! both shorter and exactly as strong a contract as GDScript's.
-
-// The if/if let nesting below deliberately mirrors the oracle's branch structure
-// so every block keeps a 1:1 line anchor to the GDScript; collapsing the branches
-// (clippy::collapsible_if) would destroy that correspondence.
 #![allow(clippy::collapsible_if)]
 use godot::builtin::math::ApproxEq;
 use godot::builtin::{Quaternion, Transform2D, Transform3D, Variant, Vector2, Vector3};
@@ -46,24 +17,19 @@ use crate::pcam3d::PhantomCamera3D;
 use crate::resources::TweenDirectorResource;
 use crate::tween_director::PhantomCameraTweenDirector;
 
-/// `phantom_camera_host.gd:43-48` values.
 const INTERPOLATION_AUTO: i64 = InterpolationMode::Auto as i64;
 const INTERPOLATION_IDLE: i64 = InterpolationMode::Idle as i64;
 const INTERPOLATION_PHYSICS: i64 = InterpolationMode::Physics as i64;
 const INTERPOLATION_MANUAL: i64 = InterpolationMode::Manual as i64;
 
-/// `Node.ProcessMode::PROCESS_MODE_DISABLED` / `PROCESS_MODE_INHERIT`.
 const PROCESS_MODE_INHERIT: i64 = 0;
 const PROCESS_MODE_DISABLED: i64 = 4;
-/// `Node.PhysicsInterpolationMode`.
 const PHYSICS_INTERPOLATION_MODE_INHERIT: i64 = 0;
 const PHYSICS_INTERPOLATION_MODE_ON: i64 = 1;
 const PHYSICS_INTERPOLATION_MODE_OFF: i64 = 2;
-/// `Camera2D.Camera2DProcessCallback`.
 const CAMERA2D_PROCESS_PHYSICS: i64 = 0;
 const CAMERA2D_PROCESS_IDLE: i64 = 1;
 
-/// A PCam of either family, so the host's node-typed seams stay typed.
 enum AnyPcam {
     TwoD(Gd<PhantomCamera2D>),
     ThreeD(Gd<PhantomCamera3D>),
@@ -151,7 +117,6 @@ impl AnyPcam {
     }
 }
 
-/// Godot `Tween.interpolate_value` adapter (`phantom_camera_host.gd:1221-1229`).
 fn tween_interp_f64(
     from: f64,
     to: f64,
@@ -185,7 +150,6 @@ fn tween_interp_v3(
     crate::math::interpolate_value_v3(from, to - from, elapsed, duration, transition, ease)
 }
 
-/// `from * from.inverse() * to` for the 3D quaternion path (`:1009-1018`).
 fn tween_interp_quat(
     from: Quaternion,
     to: Quaternion,
@@ -204,17 +168,14 @@ fn tween_interp_quat(
     )
 }
 
-/// `Object::get` narrowed to `f64`.
 fn pget_f64(object: &Gd<godot::classes::Object>, property: &str) -> f64 {
     object.get(property).try_to::<f64>().unwrap_or_default()
 }
 
-/// `Object::get` narrowed to `bool`.
 fn pget_bool(object: &Gd<godot::classes::Object>, property: &str) -> bool {
     object.get(property).try_to::<bool>().unwrap_or_default()
 }
 
-/// `Object::get` narrowed to `Vector2`.
 fn pget_v2(object: &Gd<godot::classes::Object>, property: &str) -> Vector2 {
     object
         .get(property)
@@ -222,22 +183,18 @@ fn pget_v2(object: &Gd<godot::classes::Object>, property: &str) -> Vector2 {
         .unwrap_or(Vector2::ZERO)
 }
 
-/// `Object::set` from an `f64`.
 fn pset_f64(object: &mut Gd<godot::classes::Object>, property: &str, value: f64) {
     object.set(property, &value.to_variant());
 }
 
-/// `Object::set` from a `bool`.
 fn pset_bool(object: &mut Gd<godot::classes::Object>, property: &str, value: bool) {
     object.set(property, &value.to_variant());
 }
 
-/// `Object::set` from a `Vector2`.
 fn pset_v2(object: &mut Gd<godot::classes::Object>, property: &str, value: Vector2) {
     object.set(property, &value.to_variant());
 }
 
-/// `Object::set` from an `i64`.
 fn pset_i64(object: &mut Gd<godot::classes::Object>, property: &str, value: i64) {
     object.set(property, &value.to_variant());
 }
@@ -247,12 +204,9 @@ fn pset_i64(object: &mut Gd<godot::classes::Object>, property: &str, value: i64)
 pub struct PhantomCameraHost {
     base: Base<Node>,
 
-    // ----- exported surface (`:53-65`) -----
-    /// `:57-59`.
     #[export(flags_2d_render)]
     #[var(set = set_host_layers, get = get_host_layers)]
     pub host_layers: i64,
-    /// `:62-64`.
     #[export]
     #[var(
         set = set_interpolation_mode,
@@ -262,7 +216,6 @@ pub struct PhantomCameraHost {
     )]
     pub interpolation_mode: i64,
 
-    // ----- private state (`:69-220`) -----
     active_pcam_2d: Option<Gd<PhantomCamera2D>>,
     active_pcam_3d: Option<Gd<PhantomCamera3D>>,
     active_pcam_priority: i64,
@@ -277,7 +230,6 @@ pub struct PhantomCameraHost {
     tween_transition: i64,
     tween_ease: i64,
     tween_is_instant: bool,
-    /// `:88` — reserved by the oracle's (omitted) configuration-warning path.
     #[allow(dead_code)]
     multiple_pcam_hosts: bool,
     is_child_of_camera: bool,
@@ -289,16 +241,12 @@ pub struct PhantomCameraHost {
     reset_noise_offset_2d: bool,
     noise_emitted_output_2d: Transform2D,
     noise_emitted_output_3d: Transform3D,
-    /// `:212` — only read by the omitted `_get_configuration_warnings`.
     #[allow(dead_code)]
     show_warning: bool,
     pub camera_2d: Option<Gd<Camera2D>>,
     pub camera_3d: Option<Gd<Camera3D>>,
-    /// Set in `_ready`; the first idle tick performs the oracle's
-    /// `await get_tree().process_frame` continuation (`:301-342`).
     pending_ready: bool,
 
-    // CameraAttributes snapshot/diff state (`:99-193`).
     prev_cam_attributes: Option<Gd<CameraAttributes>>,
     cam_attribute_type: i64,
     cam_attribute_changed: bool,
@@ -363,9 +311,6 @@ pub struct PhantomCameraHost {
 
 #[godot_api]
 impl PhantomCameraHost {
-    // ------------------------------------------------------------------
-    // Signals (`:19-37`)
-    // ------------------------------------------------------------------
     #[signal]
     fn viewfinder_update(check_framed_view: bool);
     #[signal]
@@ -377,11 +322,6 @@ impl PhantomCameraHost {
     #[signal]
     fn pcam_became_inactive(pcam: Gd<Node>);
 
-    // ------------------------------------------------------------------
-    // Lifecycle
-    // ------------------------------------------------------------------
-
-    /// `:261-293`.
     fn enter_tree_impl(&mut self) {
         let Some(parent) = self.base().get_parent() else {
             return;
@@ -398,7 +338,6 @@ impl PhantomCameraHost {
         self.is_child_of_camera = true;
         if let Ok(camera) = parent.clone().try_cast::<Camera2D>() {
             self.is_2d = true;
-            // `:273` — the PCam owns smoothing; the Camera2D must not double up.
             let mut camera = camera;
             camera.set_position_smoothing_enabled(false);
             self.camera_2d = Some(camera);
@@ -407,7 +346,6 @@ impl PhantomCameraHost {
             self.camera_3d = Some(camera);
         }
 
-        // `:278-293` — only when the host entered the tree *after* being ready.
         if !self.base().is_node_ready() {
             return;
         }
@@ -422,18 +360,15 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:296-298`.
     fn exit_tree_impl(&mut self) {
         let this = self.base().clone().upcast::<Node>();
         PhantomCameraManager::notify_host_removed(&this);
     }
 
-    /// `:301-342` — the body runs one idle tick later (see [`Self::pending_ready`]).
     fn ready_impl(&mut self) {
         self.pending_ready = true;
     }
 
-    /// The continuation of `await get_tree().process_frame` (`:304-342`).
     fn complete_ready(&mut self) {
         self.base_mut().set_process_priority(300);
         self.base_mut().set_physics_process_priority(300);
@@ -483,13 +418,10 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:850-854`.
     fn process_impl(&mut self, delta: f64) {
         if self.pending_ready {
             self.pending_ready = false;
             self.complete_ready();
-            // The oracle's `_ready` continuation happens between frames, so the first
-            // idle tick after it only resumes on the *next* frame.
             return;
         }
         if self.active_pcam_missing {
@@ -500,7 +432,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:856-858`.
     fn physics_process_impl(&mut self, delta: f64) {
         if self.pending_ready {
             self.pending_ready = false;
@@ -513,14 +444,6 @@ impl PhantomCameraHost {
         self.tween_follow_checker(delta);
     }
 
-    // ------------------------------------------------------------------
-    // Priority arbitration (`:345-405`)
-    // ------------------------------------------------------------------
-
-    /// `:345-361`.
-    ///
-    /// Emitted from a PCam's `set_host_layers` while that PCam is mutably
-    /// borrowed; the body reads it and can deactivate it, so defer it.
     #[func]
     fn host_pcam_layer_changed(&mut self, pcam: Gd<Node>) {
         self.base_mut()
@@ -567,7 +490,6 @@ impl PhantomCameraHost {
         self.find_pcam_with_highest_priority();
     }
 
-    /// `:364-366`.
     fn pcam_is_in_host_layer(&self, pcam: &Gd<Node>) -> bool {
         match AnyPcam::from_node(pcam) {
             Some(candidate) => candidate.in_layer(self.host_layers),
@@ -575,7 +497,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:369-392`.
     fn find_pcam_with_highest_priority(&mut self) {
         let pcam_list = if self.is_2d {
             PhantomCameraManager::pcam_2ds()
@@ -593,19 +514,15 @@ impl PhantomCameraHost {
             if !candidate.in_layer(self.host_layers) {
                 continue;
             }
-            // `:382` hidden PCams never become active.
             if !candidate.visible() {
                 continue;
             }
-            // `:383` ties resolve to the LAST inserted pcam (`>=`).
             if candidate.priority() >= highest_priority {
                 highest_priority = candidate.priority();
                 highest = Some(pcam.clone());
             }
         }
 
-        // parity: `:387` returns *before* the `set_tween_skip` sweep, so with no
-        // eligible pcam the flags are left alone.
         let Some(highest) = highest else {
             return;
         };
@@ -618,7 +535,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:394-404`.
     fn check_pcam_priority(&mut self, pcam: &Gd<Node>) {
         let Some(candidate) = AnyPcam::from_node(pcam) else {
             return;
@@ -643,16 +559,6 @@ impl PhantomCameraHost {
         candidate.set_tween_skip(false);
     }
 
-    // ------------------------------------------------------------------
-    // Activation (`:407-704`)
-    // ------------------------------------------------------------------
-
-    /// `:407-704`.
-    ///
-    /// The signal order here is observable and reproduced exactly:
-    /// `pcam_became_inactive` -> (`tween_interrupted` when a tween was running) ->
-    /// `pcam_became_active` -> `viewfinder_update` … plus the attribute snapshot that
-    /// feeds the tween diff.
     fn assign_new_active_pcam(&mut self, pcam: &Gd<Node>) {
         if !self.base().is_inside_tree() {
             return;
@@ -710,7 +616,6 @@ impl PhantomCameraHost {
             no_previous_pcam = true;
         }
 
-        // ----- assign the new active pcam (`:507-667`) -----
         if self.is_2d {
             if let Some(AnyPcam::TwoD(new_pcam_2d)) = &new_pcam {
                 let current_tween = self
@@ -763,7 +668,6 @@ impl PhantomCameraHost {
             self.signals()
                 .pcam_became_active()
                 .emit(&active.clone().upcast::<Node>());
-            // `:681-684` — keep_aspect / cull_mask / projection land before the tween.
             if let (Some(mut camera_object), Some(resource)) = (
                 self.camera_3d
                     .clone()
@@ -792,7 +696,6 @@ impl PhantomCameraHost {
             }
         }
 
-        // `:694-700`.
         let skip = new_pcam
             .as_ref()
             .map(AnyPcam::get_tween_skip)
@@ -808,14 +711,6 @@ impl PhantomCameraHost {
         self.trigger_pcam_tween = true;
     }
 
-    /// `:594-667` — the `Camera3D` + attributes diff that drives the tween writes.
-    ///
-    /// parity: three known-wrong previous-value reads are reproduced verbatim:
-    /// - `:1024-1033` `auto_exposure_speed` tweens from
-    ///   `_prev_cam_auto_exposure_scale` toward `auto_exposure_scale`;
-    /// - `:1110-1115` `frustum_near` tweens from `_prev_cam_frustum_far`;
-    /// - `:1080` `auto_exposure_max_exposure_value` only runs when
-    ///   `_cam_dof_blur_near_transition_changed`.
     fn diff_camera_3d_properties(&mut self, active: &Gd<PhantomCamera3D>) {
         let resource = active.bind().camera_resource();
         let attributes = active.bind().attributes_resource();
@@ -982,7 +877,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:614-617` / `:643-645` — seed `camera_3d.attributes` from the PCam's resource.
     fn ensure_camera_attributes_type(
         &mut self,
         attribute_type: i64,
@@ -991,8 +885,6 @@ impl PhantomCameraHost {
         let Some(mut camera) = self.camera_3d.clone() else {
             return;
         };
-        // code-instantiated: only when the Camera3D has no attributes yet, matching
-        // the oracle's `CameraAttributesPractical.new()` / `Physical.new()`.
         if camera
             .get("attributes")
             .try_to::<Gd<CameraAttributes>>()
@@ -1029,11 +921,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:452-502` — the previous-value snapshot taken while *deactivating*.
-    ///
-    /// parity: `exposure_sensitivity` is deliberately not captured here even though
-    /// the oracle compares it later (`:608`), so the tween starts from the 100.0
-    /// default.
     fn snapshot_camera_3d_properties(&mut self) {
         let Some(camera) = self.camera_3d.clone() else {
             return;
@@ -1108,7 +995,6 @@ impl PhantomCameraHost {
         self.prev_cam_far = pget_f64(&object, "far");
     }
 
-    /// `:525-546` — a default `ConvexPolygonShape3D` for THIRD_PERSON.
     fn assign_default_spring_arm_shape(&mut self, active: &Gd<PhantomCamera3D>) {
         if Engine::singleton().is_editor_hint() {
             return;
@@ -1141,8 +1027,6 @@ impl PhantomCameraHost {
             ));
         }
 
-        // code-instantiated: the spring-arm hull is derived from the Camera3D's
-        // pyramid each time a THIRD_PERSON pcam becomes active without one.
         let instance = ClassDb::singleton().instantiate(&StringName::from("ConvexPolygonShape3D"));
         if let Ok(mut shape) = instance.try_to::<Gd<godot::classes::ConvexPolygonShape3D>>() {
             shape.set("points", &expanded.to_variant());
@@ -1153,11 +1037,6 @@ impl PhantomCameraHost {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Tween value selection (`:707-796`)
-    // ------------------------------------------------------------------
-
-    /// `:707-720`.
     fn tween_value_checker(&mut self, current_pcam: Option<&Gd<Node>>, new_pcam: &Gd<Node>) {
         if let Some(candidate) = AnyPcam::from_node(new_pcam) {
             self.tween_duration = candidate.tween_duration();
@@ -1184,7 +1063,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:722-796`.
     fn tween_director_resource_check(
         &mut self,
         director: &Gd<PhantomCameraTweenDirector>,
@@ -1204,7 +1082,6 @@ impl PhantomCameraHost {
         let to_tweens = resource_bind.to_tween_resources.clone();
         drop(resource_bind);
 
-        // ----- from target (`:728-759`) -----
         match from_type {
             0 => {
                 let mut has_valid_pcam = false;
@@ -1249,7 +1126,6 @@ impl PhantomCameraHost {
             _ => {}
         }
 
-        // ----- to target (`:761-792`) -----
         match to_type {
             0 => {
                 let mut has_valid_pcam = false;
@@ -1304,11 +1180,6 @@ impl PhantomCameraHost {
         self.tween_ease = tween.ease;
     }
 
-    // ------------------------------------------------------------------
-    // Physics/idle split (`:799-829`)
-    // ------------------------------------------------------------------
-
-    /// `:799-829`.
     fn check_pcam_physics(&mut self) {
         if self.interpolation_mode == INTERPOLATION_MANUAL {
             return;
@@ -1385,7 +1256,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `get_tree().physics_interpolation` (`:814`, `:822`).
     fn tree_physics_interpolation(&self) -> bool {
         self.base()
             .get_tree()
@@ -1394,16 +1264,10 @@ impl PhantomCameraHost {
             .unwrap_or(false)
     }
 
-    /// `OS.has_feature("debug")` (`:413`, `:669`).
     fn debug_feature(&self) -> bool {
         Os::singleton().has_feature("debug")
     }
 
-    // ------------------------------------------------------------------
-    // Per-frame pump (`:861-903`)
-    // ------------------------------------------------------------------
-
-    /// `:861-903`.
     fn tween_follow_checker(&mut self, delta: f64) {
         if self.is_2d {
             let Some(active) = self.active_pcam_2d.clone() else {
@@ -1438,7 +1302,6 @@ impl PhantomCameraHost {
             self.pcam_tween(delta);
         }
 
-        // Camera noise (`:890-903`).
         if self.is_2d {
             let Some(active) = self.active_pcam_2d.clone() else {
                 return;
@@ -1501,7 +1364,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:906-928`.
     fn pcam_follow(&mut self) {
         if self.active_pcam_missing || !self.is_child_of_camera {
             return;
@@ -1529,33 +1391,21 @@ impl PhantomCameraHost {
             let Some(mut camera) = self.camera_3d.clone() else {
                 return;
             };
-            // Change-only (Rust extra): an unchanged camera transform still reaches the
-            // RenderingServer and keeps the editor redrawing every frame.
             if !camera
                 .get_global_transform()
                 .approx_eq(&self.active_pcam_3d_glob_transform)
             {
                 camera.set_global_transform(self.active_pcam_3d_glob_transform);
             }
-            // parity: `:920-928` duplicates attributes/environment into the camera in
-            // the editor only; omitted with the rest of the editor plumbing.
             let _ = active;
         }
     }
 
-    /// `:970-1218`.
     fn pcam_tween(&mut self, delta: f64) {
-        // `:973-978` — first tween frame.
         if self.tween_elapsed_time == 0.0 {
             if self.is_2d {
                 if let Some(mut active) = self.active_pcam_2d.clone() {
                     active.bind_mut().emit_tween_started();
-                    // Parity note: the oracle calls `reset_limit()` synchronously
-                    // here. Its manager signals call back into this host, and the
-                    // host is mutably borrowed by `process`, so a direct call
-                    // re-enters `bind_mut` and aborts. Defer the same call to the
-                    // end of the frame (the pattern `host_pcam_added_to_scene`
-                    // already uses) to keep the signal stream and limits intact.
                     active.call_deferred("reset_limit", &[]);
                 }
             } else if let Some(mut active) = self.active_pcam_3d.clone() {
@@ -1571,7 +1421,6 @@ impl PhantomCameraHost {
             self.tween_3d_frame();
         }
 
-        // `:1178-1187` — instant tweens disable physics interpolation.
         if self.tween_is_instant {
             if let Some(mut camera) = self.camera_2d.clone() {
                 camera.set(
@@ -1593,17 +1442,12 @@ impl PhantomCameraHost {
             return;
         }
 
-        // `:1189-1218`.
         self.trigger_pcam_tween = false;
         self.tween_elapsed_time = 0.0;
         self.signals().viewfinder_update().emit(true);
 
         if self.is_2d {
             if let Some(mut active) = self.active_pcam_2d.clone() {
-                // Parity note: the oracle calls `update_limit_all_sides()`
-                // synchronously here. Its manager signals call back into this
-                // host, which is still mutably borrowed by `process`, so defer
-                // the call (same reason as the tween-start `reset_limit`).
                 active.call_deferred("update_limit_all_sides", &[]);
                 active.bind_mut().emit_tween_completed();
                 active.bind_mut().host_set_tween_skip(false);
@@ -1614,8 +1458,6 @@ impl PhantomCameraHost {
                     && active.bind().attributes_resource().is_some()
                 {
                     if self.cam_attribute_type == 0 {
-                        // parity: `:1202-1207` — re-disable the dof-blur flags that
-                        // the diff pass force-enabled.
                         if !self.camera_3d_attribute_enabled("dof_blur_far_enabled") {
                             self.set_camera_3d_attribute_bool("dof_blur_far_enabled", false);
                         }
@@ -1652,7 +1494,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:982-1001`.
     fn tween_2d_frame(&mut self) {
         let Some(active) = self.active_pcam_2d.clone() else {
             return;
@@ -1698,7 +1539,6 @@ impl PhantomCameraHost {
         camera.set_zoom(zoom);
     }
 
-    /// `:1002-1176`.
     fn tween_3d_frame(&mut self) {
         let Some(active) = self.active_pcam_3d.clone() else {
             return;
@@ -1737,7 +1577,6 @@ impl PhantomCameraHost {
         );
         camera.set_quaternion(quat);
 
-        // `:1020-1127` — the attributes tween.
         if self.cam_attribute_changed {
             let attributes = self.camera_attribute_object();
             if let Some(mut attributes) = attributes {
@@ -1757,8 +1596,6 @@ impl PhantomCameraHost {
                             pset_f64(&mut attributes, "auto_exposure_scale", value);
                         }
                         if self.cam_auto_exposure_speed_changed {
-                            // parity: `:1028-1033` tweens `auto_exposure_speed` from
-                            // `_prev_cam_auto_exposure_scale` to `auto_exposure_scale`.
                             let value = tween_interp_f64(
                                 self.prev_cam_auto_exposure_scale,
                                 pget_f64(&source, "auto_exposure_scale"),
@@ -1794,7 +1631,6 @@ impl PhantomCameraHost {
             }
         }
 
-        // `:1129-1176` — the plain Camera3D overrides.
         let mut camera_object = camera.upcast::<godot::classes::Object>();
         if self.cam_h_offset_changed {
             let value = tween_interp_f64(
@@ -1995,8 +1831,6 @@ impl PhantomCameraHost {
         transition: i64,
         ease: i64,
     ) {
-        // parity: `:1080-1085` gates `auto_exposure_max_exposure_value` on
-        // `_cam_dof_blur_near_transition_changed` (a Practical flag).
         if self.cam_dof_blur_near_transition_changed {
             let value = tween_interp_f64(
                 self.prev_cam_exposure_max_exposure_value,
@@ -2053,7 +1887,6 @@ impl PhantomCameraHost {
             pset_f64(attributes, "frustum_far", value);
         }
         if self.cam_frustum_near_changed {
-            // parity: `:1110-1115` tweens `frustum_near` from `_prev_cam_frustum_far`.
             let value = tween_interp_f64(
                 self.prev_cam_frustum_far,
                 pget_f64(source, "frustum_near"),
@@ -2105,23 +1938,8 @@ impl PhantomCameraHost {
             .ok()
     }
 
-    /// `:1232-1258` — the viewfinder panel is out of scope; the state that matters
-    /// (`show_viewfinder_in_play`) is stored on the PCams but inert.
-    fn check_viewfinder_in_play(&mut self) {
-        // parity: TODO the play-mode viewfinder overlay is not ported.
-    }
+    fn check_viewfinder_in_play(&mut self) {}
 
-    // ------------------------------------------------------------------
-    // Manager callbacks (`:1261-1314`)
-    // ------------------------------------------------------------------
-
-    /// `:1261-1263`.
-    ///
-    /// Takes `&self`: the manager emits this from
-    /// [`PhantomCamera2D::reset_limit`], which the host itself calls from
-    /// `pcam_tween` while `PhantomCameraHost` is mutably borrowed. The callback
-    /// only touches the camera, so a shared borrow is enough and the reentrant
-    /// signal cannot abort on `bind_mut`.
     #[func]
     fn host_update_limit_2d(&self, side: i64, limit: i64) {
         let Some(mut camera) = self.camera_2d.clone() else {
@@ -2133,7 +1951,6 @@ impl PhantomCameraHost {
         );
     }
 
-    /// `:1265-1266`. Takes `&self` for the same reentrant-signal reason.
     #[func]
     fn host_draw_limit_2d(&self, enabled: bool) {
         if let Some(mut camera) = self.camera_2d.clone() {
@@ -2141,34 +1958,20 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:1271-1273`.
     #[func]
     fn host_pcam_added_to_scene(&mut self, pcam: Gd<Node>) {
-        // parity: `:1272` — `if not pcam.is_node_ready(): await pcam.ready` and then
-        // `_check_pcam_priority(pcam)`. The oracle therefore never runs the check
-        // synchronously with the caller: either it resumes from `await ready`, or it
-        // runs at the emitter's `_enter_tree` — and the manager emits
-        // `pcam_added_to_scene` from inside that PCam's own callback, where the node is
-        // still mutably borrowed by Rust, so an immediate `bind()` here aborts the
-        // callback ("Gd<T>::bind() failed, already bound") and the PCam is never
-        // activated. Queue the check on the message queue instead: that is the same
-        // post-`ready` point the oracle resumes at, and it runs outside the borrow.
         self.base_mut()
             .call_deferred("host_pcam_added_check", &[pcam.to_variant()]);
     }
 
-    /// `:280-293` — the host entered the tree after being ready, so every already
-    /// registered PCam is checked immediately (`:1271-1273` with `pcam` ready).
     fn pcam_added_to_scene(&mut self, pcam: &Gd<Node>) {
         self.check_pcam_priority(pcam);
     }
-    /// The deferred half of `:1271-1273` (see [`Self::host_pcam_added_to_scene`]).
     #[func]
     fn host_pcam_added_check(&mut self, pcam: Gd<Node>) {
         self.check_pcam_priority(&pcam);
     }
 
-    /// `:1279-1293`.
     #[func]
     fn host_pcam_removed_from_scene(&mut self, pcam: Gd<Node>) {
         if self.is_2d {
@@ -2202,12 +2005,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:1296-1301`.
-    ///
-    /// The PCam emits this from its own `visibility_changed` handler, where it is
-    /// mutably borrowed; the priority check binds that same PCam, so run the
-    /// check outside the emitter's borrow (the same deferred pattern as
-    /// `host_pcam_added_to_scene`).
     #[func]
     fn host_pcam_visibility_changed(&mut self, pcam: Gd<Node>) {
         self.base_mut().call_deferred(
@@ -2220,7 +2017,6 @@ impl PhantomCameraHost {
     fn host_pcam_visibility_changed_deferred(&mut self, pcam: Gd<Node>) {
         let is_active = self.pcam_is_active_node(&pcam);
         if is_active {
-            // `:1298` — resetting to -1 is what makes a re-show re-activate.
             self.active_pcam_priority = -1;
             self.find_pcam_with_highest_priority();
             return;
@@ -2228,10 +2024,6 @@ impl PhantomCameraHost {
         self.check_pcam_priority(&pcam);
     }
 
-    /// `:1304-1314`.
-    ///
-    /// Emitted from `PhantomCamera2D::teleport_position` while that PCam is
-    /// mutably borrowed; the handler reads its transform, so defer the read.
     #[func]
     fn host_pcam_teleported(&mut self, pcam: Gd<Node>) {
         self.base_mut()
@@ -2292,14 +2084,6 @@ impl PhantomCameraHost {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Public API (`#region Public Functions`, `:1333-1430`)
-    // ------------------------------------------------------------------
-
-    /// `:1335-1371`.
-    ///
-    /// Emitted from `PhantomCamera2D/3D::set_priority` while that PCam is
-    /// mutably borrowed; the body binds that same PCam, so defer it.
     #[func]
     fn pcam_priority_updated(&mut self, pcam: Gd<Node>) {
         self.base_mut()
@@ -2369,11 +2153,6 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:1377-1393`.
-    ///
-    /// Editor-only path (the body returns immediately in a game). The setter
-    /// emits while the PCam is borrowed, and the body may bind the same PCam,
-    /// so defer it like the other PCam-originated callbacks.
     #[func]
     fn host_pcam_priority_override(&mut self, pcam: Gd<Node>, should_override: bool) {
         self.base_mut().call_deferred(
@@ -2410,13 +2189,11 @@ impl PhantomCameraHost {
         self.signals().viewfinder_update().emit(false);
     }
 
-    /// `:1399-1400`.
     #[func]
     fn pcam_priority_override_disabled(&mut self) {
         self.signals().viewfinder_update().emit(false);
     }
 
-    /// `:1404-1408`.
     #[func]
     fn get_active_pcam(&self) -> Option<Gd<Node>> {
         if self.is_2d {
@@ -2430,20 +2207,17 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:1415-1416`.
     #[func]
     fn get_trigger_pcam_tween(&self) -> bool {
         self.trigger_pcam_tween
     }
 
-    /// `:1421-1423`.
     #[func]
     fn refresh_pcam_list_priorty(&mut self) {
         self.active_pcam_priority = -1;
         self.find_pcam_with_highest_priority();
     }
 
-    /// `:1427-1428` — the manual `InterpolationMode.MANUAL` pump.
     #[func(rename = process)]
     fn manual_process(&mut self, delta: f64) {
         if self.pending_ready {
@@ -2454,13 +2228,11 @@ impl PhantomCameraHost {
         self.tween_follow_checker(delta);
     }
 
-    /// `:1470-1471`.
     #[func]
     fn is_physics_based(&self) -> bool {
         self.follow_target_physics_based
     }
 
-    /// `:1434-1443`.
     #[func]
     fn set_interpolation_mode(&mut self, value: i64) {
         self.interpolation_mode = value;
@@ -2479,13 +2251,11 @@ impl PhantomCameraHost {
         let _ = INTERPOLATION_PHYSICS;
     }
 
-    /// `:1445-1446`.
     #[func]
     fn get_interpolation_mode(&self) -> i64 {
         self.interpolation_mode
     }
 
-    /// `:1449-1460`.
     #[func]
     fn set_host_layers(&mut self, value: i64) {
         self.host_layers = value;
@@ -2508,20 +2278,17 @@ impl PhantomCameraHost {
         }
     }
 
-    /// `:1463-1464`.
     #[func]
     fn set_host_layers_value(&mut self, layer: i64, value: bool) {
         self.host_layers = crate::abi::set_layer(self.host_layers, layer, value);
     }
 
-    /// `:1467-1468`.
     #[func]
     fn get_host_layers(&self) -> i64 {
         self.host_layers
     }
 }
 
-/// Read an `f64` out of a `Variant`, with a fallback.
 fn variant_f64(value: &Variant, fallback: f64) -> f64 {
     value.try_to::<f64>().unwrap_or(fallback)
 }
