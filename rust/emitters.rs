@@ -2,6 +2,24 @@
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_noise_emitter_2d.gd, phantom_camera_noise_emitter_3d.gd
 
+//! Sources of camera shake that a level designer places in the world.
+//!
+//! Intent: a designer drops one beside an explosion or a rumbling machine, picks a noise
+//! profile and how the shake grows, holds and fades, and triggers it. Every virtual camera
+//! listening on the same layers shakes, with no code in the level.
+//!
+//! Responsibility: it owns the timing of one shake and samples its noise profile while it
+//! plays. It moves no camera; it hands the shake to the addon's shared registry, which passes it
+//! on to the cameras that listen.
+//!
+//! Why a node: a shake is triggered from the tree, updates every frame while it plays, and is
+//! previewed in the editor at the spot where the designer placed it.
+//!
+//! Why a new type: no built-in node produces a timed, layered camera shake, and putting the
+//! timing on each camera would repeat it in every camera and lose one trigger reaching many
+//! listeners. The 2D and 3D forms share this file because they differ only in the space they
+//! shake.
+
 use godot::classes::{INode2D, INode3D, Node2D, Node3D};
 use godot::global::randi;
 use godot::prelude::*;

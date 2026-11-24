@@ -1,6 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 
+//! A test fixture that records what a camera setup does, frame by frame, so this port can be
+//! compared against the original addon.
+//!
+//! Intent: placed in a test scene beside a camera setup, it writes the real camera's view and
+//! the virtual camera's announcements over a fixed run to a file. The same scene run against
+//! the original addon produces a file to compare with.
+//!
+//! Responsibility: it observes and writes. It never changes a camera, and it does not judge
+//! whether two recordings agree.
+//!
+//! Why a node: it has to run every frame after the cameras have moved and listen to the
+//! cameras' announcements, both of which need a place in the tree.
+//!
+//! Why a new type: no built-in node can record a camera's output in a form a comparison can
+//! read, and recording from inside the cameras would put test code in the classes that ship.
+
 use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::Write;

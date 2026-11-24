@@ -2,6 +2,26 @@
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera_host/phantom_camera_host.gd
 
+//! The bridge between the virtual cameras a level is authored with and the one real camera
+//! the player looks through.
+//!
+//! Intent: a scene author puts one of these on a real camera and from then on only places and
+//! prioritises virtual cameras. The real camera then shows whichever virtual camera matters
+//! most at the moment, and blends smoothly when that changes.
+//!
+//! Responsibility: it owns the choice of which virtual camera is in control, the blend from one
+//! to the next, and copying the controlling camera's view, lens settings and shake onto the
+//! real camera. It does not decide where a virtual camera wants to be; each virtual camera
+//! works that out for itself. It does not keep track of which cameras exist; the addon's shared
+//! registry does that.
+//!
+//! Why a node: it has to sit in the tree on the real camera it drives, update in step with the
+//! engine every frame, and be discoverable by the virtual cameras that share its layers.
+//!
+//! Why a new type: the engine's cameras have no notion of competing viewpoints with priorities
+//! and blended hand-offs, and that is the whole of what the addon adds. Putting the choice on
+//! the virtual cameras instead would make each of them second-guess all the others.
+
 #![expect(
     clippy::collapsible_if,
     reason = "the nested branches follow the upstream addon branch for branch, so the port can be compared with it block by block"
