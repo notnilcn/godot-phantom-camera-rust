@@ -1,19 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 
-//! Exists only to prove that the native library loaded.
-//!
-//! Intent: a scene containing one of these is loaded by a build or CI check, and the output
-//! shows that the extension registered and which release of the original addon it ports.
-//!
 //! Responsibility: it reports and answers version questions. It touches no camera.
-//!
-//! Why a node: loading a scene and readying a node in it is the cheapest end-to-end proof that
-//! the engine found the library and registered its classes.
-//!
-//! Why a new type: a built-in node cannot tell whether this library loaded; only one of the
-//! library's own classes can.
-
 use godot::prelude::*;
 
 pub const PORTS_VERSION: &str = env!("CARGO_PKG_VERSION");

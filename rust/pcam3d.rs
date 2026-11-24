@@ -2,32 +2,6 @@
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_3d.gd
 
-//! A virtual camera for 3D scenes: a viewpoint a level designer places and tunes instead of
-//! scripting the real camera.
-//!
-//! Intent: the designer drops one wherever the player should be able to look from, tells it
-//! what to follow or frame and how, and gives it a priority. The real camera takes this view
-//! whenever it is the most important one, with no code in the level.
-//!
-//! Responsibility: it works out where it wants to be and what it wants to show, from its follow
-//! and framing rules, its limits, its dead zones and the shake it receives, and it announces
-//! when it gains or loses control and when a blend into it starts and ends. It never moves the
-//! real camera: the host does that, and only the host decides which virtual camera is in
-//! control.
-//!
-//! Why a node: a viewpoint is a place in the world. It needs a transform the designer can drag
-//! in the editor, it follows other nodes in the tree, and it must update every frame in the
-//! engine's own order.
-//!
-//! Why a new type: a plain 3D node has a place but no camera behaviour, and a real camera
-//! cannot be one of many competing viewpoints because only one can be current. Separating the
-//! viewpoint from the camera is the addon's central idea.
-//!
-//! When it follows a target from behind, it creates in code the arm that keeps it clear of
-//! walls between it and the target. That arm has to sit beside the camera under the camera's
-//! own parent, a part of the designer's tree the camera's scene does not own, and it exists only
-//! while that follow style is chosen, so it is made at runtime as the original addon does.
-
 #![expect(
     clippy::collapsible_if,
     reason = "the nested branches follow the upstream addon branch for branch, so the port can be compared with it block by block"

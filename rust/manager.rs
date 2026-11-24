@@ -2,26 +2,7 @@
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/managers/phantom_camera_manager.gd
 
-//! The addon's shared registry of the hosts, virtual cameras and blend rules in the running
-//! game, and the channel that carries camera shake from its sources to the cameras.
-//!
-//! Intent: a project enables the addon and gets one of these as a global, so hosts and virtual
 //! cameras placed in any scene find each other without the scene author wiring them together.
-//!
-//! Responsibility: it keeps track of what is currently in the tree and announces arrivals and
-//! departures, and it relays shake so that a shake source need not know which cameras listen.
-//! It takes no part in choosing a camera or moving one.
-//!
-//! Why a node: it must be a global that lives in the tree for the whole run, reachable by name
-//! from anywhere and outliving any one scene.
-//!
-//! Why a new type: no built-in node holds such a registry, and the cameras cannot keep it among
-//! themselves without each of them knowing about all the others.
-//!
-//! Inside the editor the global is not always loaded, so when an editor tool needs it and it is
-//! missing, the one instance is created in code. Whether it exists depends on how the editor
-//! was started, not on anything a scene could declare.
-
 #![expect(
     non_snake_case,
     reason = "signal argument names are scene-facing and keep the upstream addon's spelling"
