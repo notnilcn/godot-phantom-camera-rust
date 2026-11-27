@@ -41,14 +41,15 @@ unwrap_used = "deny"
 expect_used = "deny"
 
 # Editor builds load the debug library; keep them fast and small while still
-# carrying line tables for debugging. Release builds are what an exported game
-# ships.
+# carrying line tables for this crate (dependencies carry none). Release builds
+# are what an exported game ships.
 [profile.dev]
 opt-level = 1
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 [profile.release]
 lto = "thin"
