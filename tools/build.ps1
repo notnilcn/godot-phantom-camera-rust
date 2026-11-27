@@ -1,12 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-only
-#
-# Build the Phantom Camera Rust GDExtension on Windows and install the DLL where
-# the addon's .gdextension expects it:
-#
-#   bin/debug/phantom_camera_rust.dll
-#   bin/release/phantom_camera_rust.dll
-#
-# Usage: tools/build.ps1 [-Profile debug|release|all]
 param(
     [ValidateSet('debug', 'release', 'all')]
     [string]$Profile = 'debug'

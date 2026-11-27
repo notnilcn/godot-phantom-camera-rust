@@ -1,35 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/managers/phantom_camera_manager.gd
-//
 
-//! The registry every part of the camera addon reports to, so the parts never have
-//! to find each other through the scene tree.
-//!
-//! Intent: virtual cameras, the bridges that drive real cameras, shake sources and
-//! transition overrides can sit anywhere in any scene. The project loads this once
-//! for the whole game, and from then on each part simply announces that it exists
-//! and hears about the others.
-//!
-//! Responsibility: it keeps the lists of the parts that are in the tree, relays
-//! their announcements (a change of priority, a teleport, a burst of shake, a new
-//! camera limit) to whoever listens, and tracks the screen size the framing maths
-//! needs. It makes no camera decision itself; choosing the live camera and moving
-//! the real one is the bridge's job.
-//!
-//! Why a node: it must live in the tree for the whole session, outlast the scenes
-//! that come and go, and be reachable from every scene without a path.
-//!
-//! Why a new type: a plain autoloaded node has no registry or relay, and giving one
-//! to the bridge or the cameras would tie every part to a particular instance of
-//! another.
-//!
-//! The registry is normally the project's autoload. In the editor that autoload is
-//! not guaranteed to be running when the first camera of an edited scene registers,
-//! so the file creates a stand-in registry on demand there. Whether it is needed is
-//! only known in the running editor session, and the stand-in belongs to the editor's
-//! root, not to any authored scene.
-
+//! cameras placed in any scene find each other without the scene author wiring them together.
 #![expect(
     non_snake_case,
     reason = "signal argument names are scene-facing and keep the upstream addon's spelling"

@@ -1,28 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_2d.gd
-//
-
-//! A virtual camera for 2D scenes: one shot a level designer can place, aim and
-//! prioritise without touching the real camera.
-//!
-//! Intent: the designer describes a way of looking at the level, such as staying
-//! on the player, framing a group, gliding along a path or holding a fixed spot,
-//! and gives it a priority. When it becomes the most important shot, the view takes
-//! on its framing, its zoom, its limits and its shake.
-//!
-//! Responsibility: it works out where its shot should be every frame, including
-//! damping, dead zones, look-ahead and the edges the view may not cross, and it
-//! reports when it becomes live, starts or finishes a transition, or reaches an
-//! edge. It does not move the real camera and does not decide whether it is the live
-//! shot; the bridge under the real camera does both.
-//!
-//! Why a node: a shot has a place and a transform in the level, it follows other
-//! nodes in the tree, and the designer moves it in the editor like any other object.
-//!
-//! Why a new type: a built-in camera can only be the one active view, so a level
-//! with many authored shots would need code to swap them; this node is a shot that
-//! does not render, so any number can coexist and compete.
 
 #![expect(
     clippy::collapsible_if,
@@ -117,11 +95,9 @@ pub struct PhantomCamera2D {
     #[export]
     #[var(set = set_priority_override, get = get_priority_override)]
     pub priority_override: bool,
-
     #[export]
     #[var(set = set_priority, get = get_priority)]
     pub priority: i64,
-
     #[export]
     #[var(
         set = set_follow_mode,
@@ -130,38 +106,29 @@ pub struct PhantomCamera2D {
         hint_string = "None:0,Glued:1,Simple:2,Group:3,Path:4,Framed:5"
     )]
     pub follow_mode: i64,
-
     #[export]
     #[var(set = set_follow_target, get = get_follow_target)]
     pub follow_target: Option<Gd<Node2D>>,
-
     #[export]
     #[var(set = set_follow_targets, get = get_follow_targets)]
     pub follow_targets: Array<Gd<Node2D>>,
-
     #[export]
     #[var(set = set_follow_path, get = get_follow_path)]
     pub follow_path: Option<Gd<Path2D>>,
-
     #[export]
     #[var(set = set_zoom, get = get_zoom, hint = LINK)]
     pub zoom: Vector2,
-
     #[export]
     #[var(set = set_snap_to_pixel, get = get_snap_to_pixel)]
     pub snap_to_pixel: bool,
-
     #[export]
     pub frame_preview: bool,
-
     #[export]
     #[var(set = set_tween_resource, get = get_tween_resource)]
     pub tween_resource: Option<Gd<PhantomCameraTween>>,
-
     #[export]
     #[var(set = set_tween_on_load, get = get_tween_on_load)]
     pub tween_on_load: bool,
-
     #[export]
     #[var(
         set = set_inactive_update_mode,
@@ -170,23 +137,18 @@ pub struct PhantomCamera2D {
         hint_string = "Always:0,Never:1"
     )]
     pub inactive_update_mode: i64,
-
     #[export(flags_2d_render)]
     #[var(set = set_host_layers, get = get_host_layers)]
     pub host_layers: i64,
-
     #[export]
     #[var(set = set_follow_offset, get = get_follow_offset)]
     pub follow_offset: Vector2,
-
     #[export]
     #[var(set = set_follow_damping, get = get_follow_damping)]
     pub follow_damping: bool,
-
     #[export]
     #[var(set = set_follow_damping_value, get = get_follow_damping_value, hint = LINK)]
     pub follow_damping_value: Vector2,
-
     #[export]
     #[var(
         set = set_lock_axis,
@@ -195,11 +157,9 @@ pub struct PhantomCamera2D {
         hint_string = "None:0,X:1,Y:2,Xy:3"
     )]
     pub follow_axis_lock: i64,
-
     #[export]
     #[var(set = set_rotate_with_target, get = get_rotate_with_target)]
     pub rotate_with_target: bool,
-
     #[export]
     #[var(
         set = set_rotation_offset,
@@ -208,11 +168,9 @@ pub struct PhantomCamera2D {
         hint_string = "-360.0,360.0,0.001,radians_as_degrees"
     )]
     pub rotation_offset: f64,
-
     #[export]
     #[var(set = set_rotation_damping, get = get_rotation_damping)]
     pub rotation_damping: bool,
-
     #[export]
     #[var(
         set = set_rotation_damping_value,
@@ -221,11 +179,9 @@ pub struct PhantomCamera2D {
         hint_string = "0.0,1.0"
     )]
     pub rotation_damping_value: f64,
-
     #[export]
     #[var(set = set_lookahead, get = get_lookahead)]
     pub lookahead: bool,
-
     #[export]
     #[var(
         set = set_lookahead_time,
@@ -234,7 +190,6 @@ pub struct PhantomCamera2D {
         hint_string = "suffix:s"
     )]
     pub lookahead_time: Vector2,
-
     #[export]
     #[var(
         set = set_lookahead_acceleration,
@@ -243,7 +198,6 @@ pub struct PhantomCamera2D {
         hint_string = "0.0,1.0,0.001,or_greater"
     )]
     pub lookahead_acceleration: f64,
-
     #[export]
     #[var(
         set = set_lookahead_deceleration,
@@ -252,11 +206,9 @@ pub struct PhantomCamera2D {
         hint_string = "0.0,1.0,0.001,or_greater"
     )]
     pub lookahead_deceleration: f64,
-
     #[export]
     #[var(set = set_lookahead_max, get = get_lookahead_max)]
     pub lookahead_max: bool,
-
     #[export]
     #[var(
         set = set_lookahead_max_value,
@@ -265,23 +217,18 @@ pub struct PhantomCamera2D {
         hint_string = "suffix:px/s"
     )]
     pub lookahead_max_value: Vector2,
-
     #[export]
     #[var(set = set_auto_zoom, get = get_auto_zoom)]
     pub auto_zoom: bool,
-
     #[export]
     #[var(set = set_auto_zoom_min, get = get_auto_zoom_min)]
     pub auto_zoom_min: f64,
-
     #[export]
     #[var(set = set_auto_zoom_max, get = get_auto_zoom_max)]
     pub auto_zoom_max: f64,
-
     #[export]
     #[var(set = set_auto_zoom_margin, get = get_auto_zoom_margin)]
     pub auto_zoom_margin: Vector4,
-
     #[export]
     #[var(
         set = set_dead_zone_width,
@@ -290,7 +237,6 @@ pub struct PhantomCamera2D {
         hint_string = "0.0,1.0"
     )]
     pub dead_zone_width: f64,
-
     #[export]
     #[var(
         set = set_dead_zone_height,
@@ -299,30 +245,23 @@ pub struct PhantomCamera2D {
         hint_string = "0.0,1.0"
     )]
     pub dead_zone_height: f64,
-
     #[export]
     pub show_viewfinder_in_play: bool,
-
     #[export]
     #[var(set = set_draw_limits, get = get_draw_limits)]
     pub draw_limits: bool,
-
     #[export]
     #[var(set = set_limit_left, get = get_limit_left)]
     pub limit_left: i64,
-
     #[export]
     #[var(set = set_limit_top, get = get_limit_top)]
     pub limit_top: i64,
-
     #[export]
     #[var(set = set_limit_right, get = get_limit_right)]
     pub limit_right: i64,
-
     #[export]
     #[var(set = set_limit_bottom, get = get_limit_bottom)]
     pub limit_bottom: i64,
-
     #[export]
     #[var(
         set = set_limit_target,
@@ -331,19 +270,15 @@ pub struct PhantomCamera2D {
         hint_string = "TileMapLayer,CollisionShape2D"
     )]
     pub limit_target: NodePath,
-
     #[export]
     #[var(set = set_limit_margin, get = get_limit_margin)]
     pub limit_margin: Vector4i,
-
     #[export]
     #[var(set = set_noise, get = get_noise)]
     pub noise: Option<Gd<PhantomCameraNoise2D>>,
-
     #[export]
     #[var(set = set_preview_noise, get = get_preview_noise)]
     pub _preview_noise: bool,
-
     #[export(flags_2d_render)]
     #[var(set = set_noise_emitter_layer, get = get_noise_emitter_layer)]
     pub noise_emitter_layer: i64,
@@ -356,7 +291,6 @@ pub struct PhantomCamera2D {
     rigid_body_2d: Option<Gd<godot::classes::RigidBody2D>>,
     has_multiple_follow_targets: bool,
     follow_targets_single_target_index: i64,
-
     follow_targets_cache: Vec<Gd<Node2D>>,
     follow_velocity_ref: Vector2,
     rotation_velocity_ref: f64,
@@ -377,9 +311,7 @@ pub struct PhantomCamera2D {
     transform_output: Transform2D,
     transform_noise: Transform2D,
     has_noise_resource: bool,
-
     pending_noise: Option<Transform2D>,
-
     pending_axis_lock: Option<i64>,
 
     tween_duration_fallback: f64,
@@ -400,7 +332,6 @@ impl PhantomCamera2D {
     fn follow_target_changed();
     #[signal]
     fn dead_zone_changed();
-
     #[signal]
     fn dead_zone_reached(side: Vector2);
     #[signal]
@@ -497,7 +428,6 @@ impl PhantomCamera2D {
         self.tween_skip = !self.tween_on_load;
         let this = self.base().clone().upcast::<Node>();
         PhantomCameraManager::notify_pcam_added(PcamKind::TwoD, &this);
-
         self.set_priority_override(false);
 
         match self.follow_mode {
@@ -539,7 +469,6 @@ impl PhantomCamera2D {
         if !Engine::singleton().is_editor_hint() {
             self._preview_noise = true;
         }
-
         self.sync_noise_resource();
         self.resolve_limit_target();
         if let Some(lock) = self.pending_axis_lock.take() {
@@ -853,7 +782,6 @@ impl PhantomCamera2D {
         for i in 0..2 {
             let desired_axis = f64_of(axis2(&desired, i));
             let offset_axis = f64_of(axis2(&self.lookahead_offset, i));
-
             let climbing = signf(desired_axis - offset_axis) == signf(desired_axis);
             let (smooth, smooth_time) = if climbing {
                 (self.has_lookahead_acceleration, self.lookahead_acceleration)
@@ -1207,7 +1135,6 @@ impl PhantomCamera2D {
     pub fn update_limit_all_sides(&mut self) {
         match self.compute_limit_sides() {
             Some(sides) => self.limit_sides = sides,
-
             None => return,
         }
 
@@ -1495,7 +1422,6 @@ impl PhantomCamera2D {
 
         if value == 0 {
             self.should_follow = false;
-
             self.base_mut().set("top_level", &false.to_variant());
             self.is_parents_physics(None);
             return;
@@ -2141,7 +2067,6 @@ impl INode2D for PhantomCamera2D {
             lookahead_has_prev_sample: false,
             follow_axis_is_locked: false,
             follow_axis_lock_value: Vector2::ZERO,
-
             limit_sides: Vector4i::new(0, 0, 0, 0),
             limit_node: None,
             limit_inactive_pcam: false,

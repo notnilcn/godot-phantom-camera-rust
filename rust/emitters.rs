@@ -1,25 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_noise_emitter_2d.gd, phantom_camera_noise_emitter_3d.gd
-//
 
-//! Sources of camera shake, in a 2D and a 3D flavour that behave the same way.
-//!
-//! Intent: a designer drops one where something violent happens, such as an
-//! explosion, a landing or an earthquake, picks a shake pattern and which cameras
-//! it reaches, and triggers it. The shake builds up, holds and fades on its own.
-//!
-//! Responsibility: it owns the rise, hold and decay of one burst of shake and sends
-//! each frame's offset to the cameras on its layers through the addon's registry. It
-//! does not choose the shake pattern, which comes from a shared resource, and it
-//! does not move any camera; each camera decides whether the shake reaches it.
-//!
-//! Why a node: a shake source is placed in a scene, triggered from the tree, and
-//! needs a frame tick while it plays.
-//!
-//! Why a new type: no built-in node produces a time-shaped shake, and putting the
-//! envelope on the cameras would give every camera every source's timing.
-
+//! previewed in the editor at the spot where the designer placed it.
 use godot::classes::{INode2D, INode3D, Node2D, Node3D};
 use godot::global::randi;
 use godot::prelude::*;

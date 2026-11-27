@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/**
-//
-
 use godot::classes::Tween;
 use godot::classes::tween::{EaseType, TransitionType};
 use godot::prelude::*;

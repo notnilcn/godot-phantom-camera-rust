@@ -1,34 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_3d.gd
-//
-
-//! A virtual camera for 3D scenes: one shot a level designer can place, aim and
-//! prioritise without touching the real camera.
-//!
-//! Intent: the designer describes a way of looking at the world, such as following
-//! a subject, framing a group, orbiting behind a character, riding a path or simply
-//! watching from a fixed spot, and gives it a priority. When it becomes the most
-//! important shot, the view takes on its framing, its lens and its shake.
-//!
-//! Responsibility: it works out where its shot should be and where it should point
-//! every frame, including damping, dead zones, axis locks and collision with scenery
-//! for a camera behind a character, and it reports when it becomes live or starts or
-//! finishes a transition. It does not move the real camera and does not decide
-//! whether it is the live shot; the bridge under the real camera does both.
-//!
-//! Why a node: a shot has a place and a transform in the world, it follows other
-//! nodes in the tree, and the designer moves it in the editor like any other object.
-//!
-//! Why a new type: a built-in camera can only be the one active view, so a world
-//! with many authored shots would need code to swap them; this node is a shot that
-//! does not render, so any number can coexist and compete.
-//!
-//! A shot that stays behind a character needs an arm that pulls it in front of
-//! scenery, wrapped around the shot itself. The file builds that arm when such a
-//! shot first becomes ready in a running game, and only for shots set to behave
-//! that way: whether a shot needs one is a setting that can differ per shot, not
-//! part of the structure a scene declares around it.
 
 #![expect(
     clippy::collapsible_if,
@@ -91,11 +63,9 @@ pub struct PhantomCamera3D {
     #[export]
     #[var(set = set_priority_override, get = get_priority_override)]
     pub priority_override: bool,
-
     #[export]
     #[var(set = set_priority, get = get_priority)]
     pub priority: i64,
-
     #[export]
     #[var(
         set = set_follow_mode,
@@ -104,19 +74,15 @@ pub struct PhantomCamera3D {
         hint_string = "None:0,Glued:1,Simple:2,Group:3,Path:4,Framed:5,Third Person:6"
     )]
     pub follow_mode: i64,
-
     #[export]
     #[var(set = set_follow_target, get = get_follow_target)]
     pub follow_target: Option<Gd<Node3D>>,
-
     #[export]
     #[var(set = set_follow_targets, get = get_follow_targets)]
     pub follow_targets: Array<Gd<Node3D>>,
-
     #[export]
     #[var(set = set_follow_path, get = get_follow_path)]
     pub follow_path: Option<Gd<Path3D>>,
-
     #[export]
     #[var(
         set = set_look_at_mode,
@@ -125,23 +91,18 @@ pub struct PhantomCamera3D {
         hint_string = "None:0,Mimic:1,Simple:2,Group:3"
     )]
     pub look_at_mode: i64,
-
     #[export]
     #[var(set = set_look_at_target, get = get_look_at_target)]
     pub look_at_target: Option<Gd<Node3D>>,
-
     #[export]
     #[var(set = set_look_at_targets, get = get_look_at_targets)]
     pub look_at_targets: Array<Gd<Node3D>>,
-
     #[export]
     #[var(set = set_tween_resource, get = get_tween_resource)]
     pub tween_resource: Option<Gd<PhantomCameraTween>>,
-
     #[export]
     #[var(set = set_tween_on_load, get = get_tween_on_load)]
     pub tween_on_load: bool,
-
     #[export]
     #[var(
         set = set_inactive_update_mode,
@@ -150,23 +111,18 @@ pub struct PhantomCamera3D {
         hint_string = "Always:0,Never:1"
     )]
     pub inactive_update_mode: i64,
-
     #[export(flags_3d_render)]
     #[var(set = set_host_layers, get = get_host_layers)]
     pub host_layers: i64,
-
     #[export]
     #[var(set = set_camera_3d_resource, get = get_camera_3d_resource)]
     pub camera_3d_resource: Option<Gd<Camera3DResource>>,
-
     #[export]
     #[var(set = set_attributes, get = get_attributes)]
     pub attributes: Option<Gd<godot::classes::CameraAttributes>>,
-
     #[export]
     #[var(set = set_environment, get = get_environment)]
     pub environment: Option<Gd<godot::classes::Environment>>,
-
     #[export]
     #[var(
         set = set_compositor,
@@ -175,19 +131,15 @@ pub struct PhantomCamera3D {
         hint_string = "Compositor"
     )]
     pub compositor: Option<Gd<godot::classes::Resource>>,
-
     #[export]
     #[var(set = set_follow_offset, get = get_follow_offset)]
     pub follow_offset: Vector3,
-
     #[export]
     #[var(set = set_follow_damping, get = get_follow_damping)]
     pub follow_damping: bool,
-
     #[export]
     #[var(set = set_follow_damping_value, get = get_follow_damping_value, hint = LINK)]
     pub follow_damping_value: Vector3,
-
     #[export]
     #[var(
         set = set_follow_axis_lock,
@@ -196,34 +148,26 @@ pub struct PhantomCamera3D {
         hint_string = "None:0,X:1,Y:2,Z:3,Xy:4,Xz:5,Yz:6,Xyz:7"
     )]
     pub follow_axis_lock: i64,
-
     follow_axis_is_locked: bool,
-
     follow_axis_lock_value: Vector3,
-
     #[export]
     #[var(set = set_follow_distance, get = get_follow_distance)]
     pub follow_distance: f64,
-
     #[export]
     #[var(set = set_auto_follow_distance, get = get_auto_follow_distance)]
     pub auto_follow_distance: bool,
-
     #[export]
     #[var(set = set_auto_follow_distance_min, get = get_auto_follow_distance_min)]
     pub auto_follow_distance_min: f64,
-
     #[export]
     #[var(set = set_auto_follow_distance_max, get = get_auto_follow_distance_max)]
     pub auto_follow_distance_max: f64,
-
     #[export]
     #[var(
         set = set_auto_follow_distance_divisor,
         get = get_auto_follow_distance_divisor
     )]
     pub auto_follow_distance_divisor: f64,
-
     #[export]
     #[var(
         set = set_dead_zone_width,
@@ -232,7 +176,6 @@ pub struct PhantomCamera3D {
         hint_string = "0.0,1.0"
     )]
     pub dead_zone_width: f64,
-
     #[export]
     #[var(
         set = set_dead_zone_height,
@@ -241,10 +184,8 @@ pub struct PhantomCamera3D {
         hint_string = "0.0,1.0"
     )]
     pub dead_zone_height: f64,
-
     #[export]
     pub show_viewfinder_in_play: bool,
-
     #[export]
     #[var(
         set = set_vertical_rotation_offset,
@@ -253,7 +194,6 @@ pub struct PhantomCamera3D {
         hint_string = "-360.0,360.0,0.1,or_greater,or_less,radians_as_degrees"
     )]
     pub vertical_rotation_offset: f64,
-
     #[export]
     #[var(
         set = set_horizontal_rotation_offset,
@@ -262,31 +202,24 @@ pub struct PhantomCamera3D {
         hint_string = "-360.0,360.0,0.1,or_greater,or_less,radians_as_degrees"
     )]
     pub horizontal_rotation_offset: f64,
-
     #[export]
     #[var(set = set_spring_length, get = get_spring_length)]
     pub spring_length: f64,
-
     #[export(flags_3d_physics)]
     #[var(set = set_collision_mask, get = get_collision_mask)]
     pub collision_mask: i64,
-
     #[export]
     #[var(set = set_shape, get = get_shape)]
     pub shape: Option<Gd<Shape3D>>,
-
     #[export]
     #[var(set = set_margin, get = get_margin)]
     pub margin: f64,
-
     #[export]
     #[var(set = set_look_at_offset, get = get_look_at_offset)]
     pub look_at_offset: Vector3,
-
     #[export]
     #[var(set = set_look_at_damping, get = get_look_at_damping)]
     pub look_at_damping: bool,
-
     #[export]
     #[var(
         set = set_look_at_damping_value,
@@ -295,42 +228,33 @@ pub struct PhantomCamera3D {
         hint_string = "0.0,1.0,0.001,or_greater"
     )]
     pub look_at_damping_value: f64,
-
     #[export]
     #[var(set = set_up, get = get_up)]
     pub up: Vector3,
-
     #[export]
     #[var(set = set_up_target, get = get_up_target)]
     pub up_target: Option<Gd<Node3D>>,
-
     #[export]
     #[var(set = set_noise, get = get_noise)]
     pub noise: Option<Gd<PhantomCameraNoise3D>>,
-
     #[export]
     #[var(set = set_preview_noise, get = get_preview_noise)]
     pub _preview_noise: bool,
-
     #[export(flags_3d_render)]
     #[var(set = set_noise_emitter_layer, get = get_noise_emitter_layer)]
     pub noise_emitter_layer: i64,
-
     #[export]
     #[var(set = set_viewport_index, get = get_viewport_index, hint = RANGE, hint_string = "0.0,3.0")]
     pub viewport_index: i64,
-
     #[export]
     #[var(set = set_draw_follow_line, get = get_draw_follow_line)]
     pub draw_follow_line: bool,
-
     #[export]
     #[var(set = set_draw_look_at_line, get = get_draw_look_at_line)]
     pub draw_look_at_line: bool,
 
     is_active_pcam: bool,
     is_third_person_follow: bool,
-
     camera_target: Option<Gd<Node3D>>,
     should_follow: bool,
     follow_target_physics_based: bool,
@@ -357,19 +281,14 @@ pub struct PhantomCamera3D {
     draw_follow_gizmo_line: bool,
     follow_target_position: Vector3,
     draw_look_at_gizmo_line: bool,
-
     look_at_target_physics_based: bool,
-
     pending_noise: Option<Transform3D>,
-
     pending_spring_arm: Option<(Gd<SpringArm3D>, Vector3)>,
-
     pending_axis_lock: Option<i64>,
 
     tween_duration_fallback: f64,
     tween_transition_fallback: i64,
     tween_ease_fallback: i64,
-
     keep_aspect_value: i64,
     pub viewport_position: Vector2,
 }
@@ -388,7 +307,6 @@ impl PhantomCamera3D {
     fn look_at_target_changed();
     #[signal]
     fn dead_zone_changed();
-
     #[signal]
     fn dead_zone_reached();
     #[signal]
@@ -534,7 +452,6 @@ impl PhantomCamera3D {
                 self.check_physics_body(&target);
             }
         }
-
         if matches!(self.look_at_mode, 1 | 2) {
             if let Some(target) = self.look_at_target_node() {
                 self.check_physics_body(&target);
@@ -582,9 +499,7 @@ impl PhantomCamera3D {
         }
 
         let mut arm = SpringArm3D::new_alloc();
-
         arm.set("top_level", &true.to_variant());
-
         arm.set_length(real_of(self.follow_distance));
         arm.set_collision_mask(self.collision_mask as u32);
         if let Some(shape) = self.shape.clone() {
@@ -645,7 +560,6 @@ impl PhantomCamera3D {
         arm.set_global_rotation(initial_rotation);
         self.has_follow_spring_arm = true;
         self.follow_spring_arm = Some(arm);
-
         self.base_mut().set("top_level", &false.to_variant());
     }
 
@@ -1121,7 +1035,6 @@ impl PhantomCamera3D {
 
             let ratio_a = theta.cos() - dot * sin_theta / sin_theta_total;
             let ratio_b = sin_theta / sin_theta_total;
-
             let output = current_quat * real_of(ratio_a) + target_quat * real_of(ratio_b);
 
             self.transform_output.basis = Basis::from_quaternion(output);
@@ -2068,7 +1981,6 @@ impl PhantomCamera3D {
         if let Some(mut arm) = self.follow_spring_arm.clone() {
             match &value {
                 Some(shape) => arm.set_shape(shape),
-
                 None => arm.set("shape", &Variant::nil()),
             }
         }

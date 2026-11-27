@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/resources/*.gd
-//
-
 use godot::classes::fast_noise_lite::NoiseType;
 use godot::classes::{FastNoiseLite, IResource, Resource};
 use godot::global::randi;
@@ -300,7 +298,6 @@ impl IResource for PhantomCameraNoise2D {
     fn init(base: Base<Resource>) -> Self {
         let mut noise_algorithm = FastNoiseLite::new_gd();
         noise_algorithm.set_noise_type(NoiseType::PERLIN);
-
         noise_algorithm.set_seed(truncate_seed(randi()));
         noise_algorithm.set_frequency(0.5);
 

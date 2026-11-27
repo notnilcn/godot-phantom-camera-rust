@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
-#
-# Build the Phantom Camera Rust GDExtension and install the library where the
-# addon's .gdextension expects it:
-#
-#   bin/debug/[lib]phantom_camera_rust.{so,dylib,dll}
-#   bin/release/[lib]phantom_camera_rust.{so,dylib,dll}
-#
-# Usage: tools/build.sh [--debug | --release | --all] [cargo args...]
-#   (default)  debug library (what the editor loads)
-#   --release  release library
-#   --all      both
-#
-# Examples:
-#   tools/build.sh
-#   tools/build.sh --release
-#   tools/build.sh --all --target x86_64-pc-windows-gnu
 
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+  cat <<'USAGE'
+Usage: tools/build.sh [--debug | --release | --all] [cargo args...]
+
+Build the Phantom Camera Rust GDExtension and install the library where the
+addon's .gdextension loads it from: bin/<profile>/.
+
+  --debug    debug library, the one the editor loads (default)
+  --release  release library, the one an exported game ships
+  --all      both
+  -h, --help show this help
+
+Any other argument is passed to cargo build.
+USAGE
+}
 
 profiles=(debug)
 cargo_args=()
@@ -28,10 +28,7 @@ while (($#)); do
     --debug) profiles=(debug); shift ;;
     --release) profiles=(release); shift ;;
     --all) profiles=(debug release); shift ;;
-    -h|--help)
-      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
-      exit 0
-      ;;
+    -h|--help) usage; exit 0 ;;
     *) cargo_args+=("$1"); shift ;;
   esac
 done

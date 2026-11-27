@@ -1,14 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-#
-# Rust GDExtension port of Phantom Camera 0.11.0.3 (MIT, Marcus Skov).
-# The upstream licence text ships in LICENSE-PhantomCamera-MIT; this port is
-# GPL-3.0-only (see LICENSE).
 
-# The addon is a repository of its own, vendored into the Godot project as a
-# submodule. Declaring the workspace root here keeps `cargo build` inside this
-# folder (tools/build.sh, and the client build scripts) independent of whichever
-# Cargo workspace happens to contain the checkout, and lets the profiles below
-# apply.
 [workspace]
 
 [package]
@@ -27,12 +18,9 @@ path = "rust/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-# Pinned to the gdext version the port was validated against (Godot 4.7 API).
 godot = { version = "=0.5.5", features = ["api-4-7"] }
 
 [lints.rust]
-# A GDExtension entry point needs `unsafe impl ExtensionLibrary`; keep the
-# `unsafe` confined to that glue.
 unsafe_code = "allow"
 
 [lints.clippy]
@@ -40,9 +28,6 @@ all = "deny"
 unwrap_used = "deny"
 expect_used = "deny"
 
-# Editor builds load the debug library; keep them fast and small while still
-# carrying line tables for this crate (dependencies carry none). Release builds
-# are what an exported game ships.
 [profile.dev]
 opt-level = 1
 debug = "line-tables-only"

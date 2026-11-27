@@ -1,35 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera_host/phantom_camera_host.gd
-//
 
-//! The bridge between the virtual cameras a level is authored with and the one real
-//! camera that renders it.
-//!
-//! Intent: a scene author places one of these under a real camera and then never
-//! drives that camera by hand again. Whichever virtual camera matters most at a given
-//! moment decides what the real camera sees, and a change of shot glides from the old
-//! framing to the new one instead of cutting.
-//!
-//! Responsibility: it decides which virtual camera is live, by priority, visibility
-//! and layer, and it owns the transition between two of them: the blend of position,
-//! rotation, zoom and lens settings, the shake added on top, and the timing of
-//! the whole frame update relative to physics. It does not decide how any one
-//! virtual camera frames its subject; each of those works out its own framing and
-//! the bridge only reads the result. It keeps no registry of its own either; it
-//! learns which virtual cameras exist from the addon's shared registry.
-//!
-//! Why a node: it has to sit under the real camera it drives, follow the engine's
-//! frame and physics ticks, and react when cameras enter and leave the tree.
-//!
-//! Why a new type: a built-in camera has one fixed framing and no notion of
-//! competing shots, and pushing the arbitration into the virtual cameras would make
-//! every one of them argue with every other about who owns the real camera.
-//!
-//! It builds no nodes. The lens settings and the collision shape it gives the real
-//! camera are resources made at run time, because they copy whichever virtual camera
-//! is live, and which one that is, and how it is set, is only known while playing.
-
+//! The bridge between the virtual cameras a level is authored with and the one real camera
+//! Intent: a scene author puts one of these on a real camera and from then on only places and
 #![expect(
     clippy::collapsible_if,
     reason = "the nested branches follow the upstream addon branch for branch, so the port can be compared with it block by block"
@@ -56,11 +30,9 @@ const INTERPOLATION_MANUAL: i64 = InterpolationMode::Manual as i64;
 
 const PROCESS_MODE_INHERIT: i64 = 0;
 const PROCESS_MODE_DISABLED: i64 = 4;
-
 const PHYSICS_INTERPOLATION_MODE_INHERIT: i64 = 0;
 const PHYSICS_INTERPOLATION_MODE_ON: i64 = 1;
 const PHYSICS_INTERPOLATION_MODE_OFF: i64 = 2;
-
 const CAMERA2D_PROCESS_PHYSICS: i64 = 0;
 const CAMERA2D_PROCESS_IDLE: i64 = 1;
 
@@ -241,7 +213,6 @@ pub struct PhantomCameraHost {
     #[export(flags_2d_render)]
     #[var(set = set_host_layers, get = get_host_layers)]
     pub host_layers: i64,
-
     #[export]
     #[var(
         set = set_interpolation_mode,
@@ -265,7 +236,6 @@ pub struct PhantomCameraHost {
     tween_transition: i64,
     tween_ease: i64,
     tween_is_instant: bool,
-
     #[expect(
         dead_code,
         reason = "mirrors upstream state that only its omitted editor paths read"
@@ -280,7 +250,6 @@ pub struct PhantomCameraHost {
     reset_noise_offset_2d: bool,
     noise_emitted_output_2d: Transform2D,
     noise_emitted_output_3d: Transform3D,
-
     #[expect(
         dead_code,
         reason = "mirrors upstream state that only its omitted editor paths read"
@@ -288,7 +257,6 @@ pub struct PhantomCameraHost {
     show_warning: bool,
     pub camera_2d: Option<Gd<Camera2D>>,
     pub camera_3d: Option<Gd<Camera3D>>,
-
     pending_ready: bool,
 
     prev_cam_attributes: Option<Gd<CameraAttributes>>,
@@ -382,7 +350,6 @@ impl PhantomCameraHost {
         self.is_child_of_camera = true;
         if let Ok(camera) = parent.clone().try_cast::<Camera2D>() {
             self.is_2d = true;
-
             let mut camera = camera;
             camera.set_position_smoothing_enabled(false);
             self.camera_2d = Some(camera);
@@ -467,7 +434,6 @@ impl PhantomCameraHost {
         if self.pending_ready {
             self.pending_ready = false;
             self.complete_ready();
-
             return;
         }
         if self.active_pcam_missing {
@@ -560,11 +526,9 @@ impl PhantomCameraHost {
             if !candidate.in_layer(self.host_layers) {
                 continue;
             }
-
             if !candidate.visible() {
                 continue;
             }
-
             if candidate.priority() >= highest_priority {
                 highest_priority = candidate.priority();
                 highest = Some(pcam.clone());
@@ -725,7 +689,6 @@ impl PhantomCameraHost {
             self.signals()
                 .pcam_became_active()
                 .emit(&active.clone().upcast::<Node>());
-
             if let (Some(mut camera_object), Some(resource)) = (
                 self.camera_3d
                     .clone()
@@ -943,7 +906,6 @@ impl PhantomCameraHost {
         let Some(mut camera) = self.camera_3d.clone() else {
             return;
         };
-
         if camera
             .get("attributes")
             .try_to::<Gd<CameraAttributes>>()
@@ -1450,14 +1412,12 @@ impl PhantomCameraHost {
             let Some(mut camera) = self.camera_3d.clone() else {
                 return;
             };
-
             if !camera
                 .get_global_transform()
                 .approx_eq(&self.active_pcam_3d_glob_transform)
             {
                 camera.set_global_transform(self.active_pcam_3d_glob_transform);
             }
-
             let _ = active;
         }
     }
@@ -1467,7 +1427,6 @@ impl PhantomCameraHost {
             if self.is_2d {
                 if let Some(mut active) = self.active_pcam_2d.clone() {
                     self.with_base_released(|| active.bind_mut().emit_tween_started());
-
                     active.call_deferred("reset_limit", &[]);
                 }
             } else if let Some(mut active) = self.active_pcam_3d.clone() {
@@ -2029,7 +1988,6 @@ impl PhantomCameraHost {
     fn pcam_added_to_scene(&mut self, pcam: &Gd<Node>) {
         self.check_pcam_priority(pcam);
     }
-
     #[func]
     fn host_pcam_added_check(&mut self, pcam: Gd<Node>) {
         self.check_pcam_priority(&pcam);

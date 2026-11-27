@@ -1,27 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
-//
-
-//! A development probe that records what the cameras did, frame by frame, so two
-//! implementations of the addon can be compared on the same scene.
-//!
-//! Intent: a parity run places it in a test scene, lets the scene play for a while,
-//! and gets a line per frame of camera state and camera events to compare against a
-//! reference run. It is never part of a shipped game scene.
-//!
-//! Responsibility: it finds the real camera and the bridge driving it, follows
-//! whichever virtual camera is live, listens to its events, and writes the record.
-//! It touches every camera only by name and never through this library's own types,
-//! so it measures any implementation of the addon, including one written in a
-//! scripting language, and still works when this library's camera types are absent.
-//! It never changes what it observes.
-//!
-//! Why a node: it has to see the frame after the cameras have moved, hear their
-//! signals, and run inside the scene it measures.
-//!
-//! Why a new type: no built-in node records engine state to a file, and putting the
-//! recording in the camera types would make the measurement depend on the thing
-//! being measured.
 
 use std::cell::{Cell, RefCell};
 use std::fs::File;
@@ -68,21 +46,15 @@ pub struct PcamRecorder {
     require_class: GString,
 
     frame: Rc<Cell<i64>>,
-
     emitted: Rc<RefCell<Vec<String>>>,
 
     out: Option<File>,
-
     out_display: String,
     camera: Option<Gd<Node>>,
-
     dims: u8,
     host: Option<Gd<Node>>,
-
     pcam: Option<Gd<Node>>,
-
     linked: Option<Gd<Node>>,
-
     links: Vec<(StringName, Callable)>,
     written: i64,
     done: bool,
@@ -169,7 +141,6 @@ impl PcamRecorder {
 
         let line = self.frame_line(delta);
         self.write_line(&line)?;
-
         self.emitted.borrow_mut().clear();
 
         self.frame.set(self.frame.get() + 1);
@@ -373,7 +344,6 @@ impl PcamRecorder {
             .host
             .as_ref()
             .map_or_else(String::new, |node| node.get_path().to_string());
-
         let pcam = self.pcam.clone().or_else(|| self.fallback_pcam());
         let pcam_class = pcam
             .as_ref()

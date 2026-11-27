@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Khvor' Gates contributors
 // Portions derived from Phantom Camera 0.11.0.3 (MIT, Marcus Skov) addons/phantom_camera/scripts/phantom_camera/phantom_camera_constants.gd
-//
 
 #![expect(
     dead_code,
@@ -192,11 +191,8 @@ pub const TWEEN_DEFAULT_TRANSITION: i64 = TransitionType::Linear as i64;
 pub const CAMERA_3D_DEFAULT_CULL_MASK: i64 = 1_048_575;
 
 pub const LIMIT_LEFT_DEFAULT: i64 = -10_000_000;
-
 pub const LIMIT_TOP_DEFAULT: i64 = -10_000_000;
-
 pub const LIMIT_RIGHT_DEFAULT: i64 = 10_000_000;
-
 pub const LIMIT_BOTTOM_DEFAULT: i64 = 10_000_000;
 
 pub const LIMIT_SIDES_DEFAULT: (i64, i64, i64, i64) = (
